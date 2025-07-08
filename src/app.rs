@@ -162,7 +162,7 @@ pub fn initialize_page() -> Html {
                 <br/>
                 <input class="init-elems" id="prox-input" ref={prox_folder_input} placeholder="Enter your password"/>
                 <br/>
-                <input class="init-elems" id="local-input" ref={local_ai_url_input} placeholder="Enter a URL for your OpenAI-compatible endpoint..." />
+                <input class="init-elems" id="local-input" ref={local_ai_url_input} placeholder="Enter a URL for your Proxima endpoint..." />
                 <br/>
                 <button class="init-elems" type="submit">{"Start"}</button>
             </form>
@@ -383,7 +383,7 @@ pub fn app_page() -> Html {
                 <div class="multi-input-container">
                     <div class="label-input-combo">
                         <p>{"Local AI URL : "}</p>
-                        <input placeholder="Enter a valid URL to an OpenAI-compatible backend here"/>
+                        <input placeholder="Enter a valid URL to an Proxima backend here"/>
                         <button class="mainapp-button">{"Check URL ?"}</button>
                     </div>
 
