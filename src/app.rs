@@ -154,19 +154,21 @@ pub fn initialize_page() -> Html {
 
     html! {
         <main class="container">
-            <h1>{"Welcome to Proxima !"}</h1>
+            <div class="first-level standard-padding-margin-corners">
+                <h1>{"Welcome to Proxima !"}</h1>
 
-            <p>{"We need a bit of info to get you started :"}</p>
-            
-            <form onsubmit={initialize}>
-                <input class="init-elems" id="pseudo-input" ref={pseudonym_input} placeholder="Enter your pseudonym..." />
-                <br/>
-                <input class="init-elems" id="prox-input" ref={prox_folder_input} placeholder="Enter your password"/>
-                <br/>
-                <input class="init-elems" id="local-input" ref={local_ai_url_input} placeholder="Enter a URL for your Proxima endpoint..." />
-                <br/>
-                <button class="init-elems" type="submit">{"Start"}</button>
-            </form>
+                <p>{"We need a bit of info to get you started :"}</p>
+                
+                <form onsubmit={initialize} class="second-level standard-padding-margin-corners">
+                    <input class="standard-padding-margin-corners most-horizontal-space-no-flex" id="pseudo-input" ref={pseudonym_input} placeholder="Enter your pseudonym..." />
+                    <br/>
+                    <input class="standard-padding-margin-corners most-horizontal-space-no-flex" id="prox-input" ref={prox_folder_input} placeholder="Enter your password"/>
+                    <br/>
+                    <input class="standard-padding-margin-corners most-horizontal-space-no-flex" id="local-input" ref={local_ai_url_input} placeholder="Enter a URL for your Proxima endpoint..." />
+                    <br/>
+                    <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" type="submit">{"Start"}</button>
+                </form>
+            </div>
         </main>
     }
 }
@@ -368,19 +370,19 @@ pub fn app_page() -> Html {
             };
             html!{
                 <div>
-                <div class="multi-input-container">
-                    <div class="label-input-combo">
+                <div class="multi-input-container standard-padding-margin-corners first-level">
+                    <div class="label-input-combo standard-padding-margin-corners second-level">
                         <p>{"Name (Optional) : "}</p>
-                        <input placeholder="Enter a name here..."/>
+                        <input class="standard-padding-margin-corners" placeholder="Enter a name here..."/>
                         
-                        <button class="mainapp-button">{"Set"}</button>
+                        <button class="mainapp-button standard-padding-margin-corners">{"Set"}</button>
                     </div>
-                    <div class="label-input-combo">
+                    <div class="label-input-combo standard-padding-margin-corners second-level">
                         <p>{"Pseudonym (Obligatory) : "}</p>
-                        <input placeholder="Enter a pseudonym here..."/>
+                        <input class="standard-padding-margin-corners" placeholder="Enter a pseudonym here..."/>
                         <button class="mainapp-button">{"Set"}</button>
                     </div>
-                    <div class="label-input-combo">
+                    <div class="label-input-combo standard-padding-margin-corners second-level">
                         <p>
                             {"What do you want to be called by ?"}
                         </p>
@@ -388,17 +390,17 @@ pub fn app_page() -> Html {
                     
                 </div>
                 <hr/>
-                <div class="multi-input-container">
-                    <div class="label-input-combo">
+                <div class="multi-input-container standard-padding-margin-corners second-level">
+                    <div class="label-input-combo standard-padding-margin-corners third-level">
                         <p>{"Local AI URL : "}</p>
-                        <input placeholder="Enter a valid URL to an Proxima backend here"/>
-                        <button class="mainapp-button">{"Check URL ?"}</button>
+                        <input class="standard-padding-margin-corners" placeholder="Enter a valid URL to an Proxima backend here"/>
+                        <button class="mainapp-button standard-padding-margin-corners">{"Check URL ?"}</button>
                     </div>
 
-                    <div class="label-input-combo">
-                        <input placeholder="Have a prompt ?" ref={prompt_node_ref}/>
+                    <div class="label-input-combo standard-padding-margin-corners third-level">
+                        <input class="standard-padding-margin-corners" placeholder="Have a prompt ?" ref={prompt_node_ref}/>
 
-                        <button class="mainapp-button" onclick={prompt_send_callback}>{"Send"}</button>
+                        <button class="mainapp-button standard-padding-margin-corners" onclick={prompt_send_callback}>{"Send"}</button>
                     </div>
                 </div>
                 
@@ -609,9 +611,9 @@ pub fn app_page() -> Html {
             };
             html!{
                 <div class="chat-part">
-                    <div class="sidebar">
+                    <div class="all-vertical-space standard-padding-margin-corners first-level">
                         <h1>{"Past chats"}</h1>
-                        <button class="mainapp-button" onclick={new_chat_callback}>{"New chat"}</button>
+                        <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_chat_callback}>{"New chat"}</button>
                         <hr/>
                         <div class="list-holder">
                             {
@@ -624,8 +626,8 @@ pub fn app_page() -> Html {
                             }
                         </div>
                     </div>
-                    <div class="not-sidebar chat-tab-not-sidebar">
-                        <div class="chat-tab-current-chat">
+                    <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
+                        <div class="chat-tab-current-chat second-level standard-padding-margin-corners">
                             <h1>{
                             match chosen_chat_by_id {
                                 Some(chat) => match &chat.chat_title {
@@ -635,7 +637,7 @@ pub fn app_page() -> Html {
                                 None => "Please select a chat or start one :)".to_string()
                             }} 
                             </h1>
-                            <div class="list-holder fixed-80-vh">
+                            <div class="list-holder all-vertical-space-flex">
                             {
                                 match chosen_chat_by_id {
                                     Some(chat) => {
@@ -670,14 +672,14 @@ pub fn app_page() -> Html {
                             </div>
                         </div>
 
-                        <div class="label-input-combo bottom-bar">
-                            <input placeholder="Have a prompt ?" ref={prompt_node_ref}/>
-
-                            <button class="mainapp-button" onclick={prompt_send_callback}>{"Send"}</button>
-                            <select class="menu-item" ref={cc_select_ref} onchange={cc_select_callback}>
+                        <div class="label-input-combo bottom-bar most-horizontal-space-no-flex third-level standard-padding-margin-corners">
+                            <textarea placeholder="Have a prompt ?" ref={prompt_node_ref} class="standard-padding-margin-corners"/>
+                            <select class="standard-padding-margin-corners" ref={cc_select_ref} onchange={cc_select_callback}>
                                 <option value="NO CHAT CONFIG WHATSOEVER (please do not use this magic name for a real chat config)">{"None"}</option>
                                 {config_htmls}
                             </select>
+                            <button class="mainapp-button standard-padding-margin-corners" onclick={prompt_send_callback}>{"Send"}</button>
+                            
                         </div>
                     </div>
                     
@@ -832,9 +834,9 @@ pub fn app_page() -> Html {
 
             html!{
                 <div class="chat-part">
-                    <div class="sidebar">
+                    <div class="all-vertical-space standard-padding-margin-corners first-level">
                         <h1>{"Tags"}</h1>
-                        <button class="mainapp-button" onclick={new_tag_callback}>{"New tag"}</button>
+                        <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_tag_callback}>{"New tag"}</button>
                         <hr/>
 
                         <div class="list-holder">
@@ -848,7 +850,7 @@ pub fn app_page() -> Html {
                             }
                         </div>
                     </div>
-                    <div class="not-sidebar chat-tab-not-sidebar">
+                    <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
                         <h1> {
                             match chosen_tag_by_id {
                                 Some(tag) => {format!("Currently modifying : {}", tag.get_name())},
@@ -856,18 +858,18 @@ pub fn app_page() -> Html {
                             }
                         }
                         </h1>
-                        <div class="multi-input-container">
+                        <div class="multi-input-container second-level standard-padding-margin-corners">
                             
-                            <div class="label-input-combo">
+                            <div class="label-input-combo third-level standard-padding-margin-corners">
                                 <p>{"Tag name (obligatory) : "}</p>
-                                <input placeholder="Enter a tag name here..." ref={tag_name_ref}/>
+                                <input class="standard-padding-margin-corners" placeholder="Enter a tag name here..." ref={tag_name_ref}/>
                                 
                             </div>
-                            <div class="label-input-combo">
+                            <div class="label-input-combo third-level standard-padding-margin-corners">
                                 <p>{"Tag description (optional) : "}</p>
-                                <input placeholder="Enter tag descirption here... keep it simple !" ref={tag_desc_ref}/>
+                                <input class="standard-padding-margin-corners" placeholder="Enter tag descirption here... keep it simple !" ref={tag_desc_ref}/>
                             </div>
-                            <div class="chat-tab-current-chat">
+                            <div class="chat-tab-current-chat third-level standard-padding-margin-corners">
                                 <h2>
                                     {
                                         match *chosen_parent_tag {
@@ -891,9 +893,9 @@ pub fn app_page() -> Html {
                             
                         </div>
 
-                        <div class="label-input-combo bottom-bar">
+                        <div class="label-input-combo bottom-bar most-horizontal-space-no-flex">
 
-                            <button class="mainapp-button" onclick={tag_update_callback}>
+                            <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={tag_update_callback}>
                             {
                                 match chosen_tag_by_id {
                                     Some(tag) => {"Save modifications".to_string()},
@@ -1048,9 +1050,9 @@ pub fn app_page() -> Html {
 
             html!{
                 <div class="chat-part">
-                    <div class="sidebar">
+                    <div class="all-vertical-space standard-padding-margin-corners first-level">
                         <h1>{"Access Modes"}</h1>
-                        <button class="mainapp-button" onclick={new_tag_callback}>{"New Access Mode"}</button>
+                        <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_tag_callback}>{"New Access Mode"}</button>
                         <hr/>
 
                         <div class="list-holder">
@@ -1064,7 +1066,7 @@ pub fn app_page() -> Html {
                             }
                         </div>
                     </div>
-                    <div class="not-sidebar chat-tab-not-sidebar">
+                    <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
                         <h1> {
                             match chosen_am_by_id {
                                 Some(tag) => {format!("Currently modifying : {}", tag.get_name())},
@@ -1072,20 +1074,15 @@ pub fn app_page() -> Html {
                             }
                         }
                         </h1>
-                        <div class="multi-input-container">
-                            <div class="label-input-combo">
+                        <div class="multi-input-container second-level standard-padding-margin-corners">
+                            <div class="label-input-combo standard-padding-margin-corners third-level">
                                 <p>{"Access mode name (obligatory) : "}</p>
-                                <input placeholder="Enter an access mode name here..." ref={am_name_ref}/>
+                                <input class="standard-padding-margin-corners" placeholder="Enter an access mode name here..." ref={am_name_ref}/>
                                 
                             </div>
-                            <div class="chat-tab-current-chat">
+                            <div class="chat-tab-current-chat third-level standard-padding-margin-corners">
                                 <h2>
-                                    {
-                                        match *chosen_parent_tag {
-                                            Some(tag_id) => format!("Currently chosen parent tag : {}", client_database.tags.get_tags()[tag_id].get_name().clone()),
-                                            None => "Does this tag have a parent ?".to_string()
-                                        }
-                                    }
+                                    {"What tags are associated with this access mode ?"}
                                 </h2>
                                 <table>
                                     <tr>
@@ -1128,9 +1125,8 @@ pub fn app_page() -> Html {
                             
                         </div>
 
-                        <div class="label-input-combo bottom-bar">
-
-                            <button class="mainapp-button" onclick={am_update_callback}>
+                        <div class="label-input-combo bottom-bar most-horizontal-space-no-flex">
+                            <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={am_update_callback}>
                             {
                                 match chosen_am_by_id {
                                     Some(tag) => {"Save modifications".to_string()},
@@ -1393,48 +1389,48 @@ pub fn app_page() -> Html {
                 match (*setting_in_modification).clone() {
                     Some(setting) => match setting {
                         ChatSetting::PrePrompt(prompt) => html!(
-                            <div class="label-input-combo">
+                            <div class="label-input-combo second-level standard-padding-margin-corners">
                                 <p>{"Pre-prompt value : "}</p>
-                                <textarea placeholder="Pre-prompt here..." id="pre_pre_prompt" ref={cc_setting_value_ref}/>
+                                <textarea class="standard-padding-margin-corners" placeholder="Pre-prompt here..." id="pre_pre_prompt" ref={cc_setting_value_ref}/>
                             </div>
                         ),
                         ChatSetting::PrePromptBeforeLatest(prompt) => html!(
-                            <div class="label-input-combo">
+                            <div class="label-input-combo second-level standard-padding-margin-corners">
                                 <p>{"Pre-prompt added after all of your prompts : "}</p>
-                                <textarea placeholder="Pre-prompt here..." id="pre_prompt" ref={cc_setting_value_ref}/>
+                                <textarea class="standard-padding-margin-corners" placeholder="Pre-prompt here..." id="pre_prompt" ref={cc_setting_value_ref}/>
                             </div>
                         ),
                         ChatSetting::Temperature(temp) => html!(
-                            <div class="label-input-combo">
+                            <div class="label-input-combo second-level standard-padding-margin-corners">
                                 <p>{"Temperature : "}</p>
-                                <input type="range" id="temp_slider" min="0" max="1000" step="1" ref={cc_setting_value_ref} />
+                                <input class="standard-padding-margin-corners" type="range" id="temp_slider" min="0" max="1000" step="1" ref={cc_setting_value_ref} />
                             </div>
                         ),
                         ChatSetting::SystemPrompt(prompt) => html!(
-                            <div class="label-input-combo">
+                            <div class="label-input-combo second-level standard-padding-margin-corners">
                                 <p>{"System prompt part : "}</p>
-                                <textarea placeholder="System prompt here..." id="system_prompt" ref={cc_setting_value_ref}/>
+                                <textarea class="standard-padding-margin-corners" placeholder="System prompt here..." id="system_prompt" ref={cc_setting_value_ref}/>
                             </div>
                         ),
                         ChatSetting::Tool(tool) => html!(
-                            <div class="label-input-combo">
+                            <div class="label-input-combo second-level standard-padding-margin-corners">
                                 <p>{"System prompt part : "}</p>
-                                <select class="menu-item" id="tool_select" ref={cc_setting_value_ref}>
+                                <select class="standard-padding-margin-corners" id="tool_select" ref={cc_setting_value_ref}>
                                     <option value={"Calculator"}>{"Calculator"}</option>
                                     <option value={"Local Memory"}>{"Local Memory"}</option>
                                 </select>
                             </div>
                         ),
                         ChatSetting::MaxContextLength(length) => html!(
-                            <div class="label-input-combo">
+                            <div class="label-input-combo second-level standard-padding-margin-corners">
                                 <p>{"Max context length (in tokens) : "}</p>
-                                <input type="range" id="context_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
+                                <input class="standard-padding-margin-corners" type="range" id="context_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
                             </div>
                         ),
                         ChatSetting::ResponseTokenLimit(limit) => html!(
-                            <div class="label-input-combo">
+                            <div class="label-input-combo second-level standard-padding-margin-corners">
                                 <p>{"Max response length (in tokens) : "}</p>
-                                <input type="range" id="response_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
+                                <input class="standard-padding-margin-corners" type="range" id="response_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
                             </div>
                         ),
                         ChatSetting::AccessMode(access_mode) => {
@@ -1445,9 +1441,9 @@ pub fn app_page() -> Html {
                             }).collect();
 
                             html!(
-                                <div class="label-input-combo">
+                                <div class="label-input-combo second-level standard-padding-margin-corners">
                                     <p>{"System prompt part : "}</p>
-                                    <select class="menu-item" id="access_select" ref={cc_setting_value_ref}>
+                                    <select class="standard-padding-margin-corners" id="access_select" ref={cc_setting_value_ref}>
                                         {access_modes_htmls}
                                     </select>
                                 </div>
@@ -1461,13 +1457,13 @@ pub fn app_page() -> Html {
             };
             html!(
                 <div class="chat-part">
-                    <div class="sidebar">
+                    <div class="all-vertical-space standard-padding-margin-corners first-level at-most-a-sixth-width">
                         <h1>{"Chat configurations"}</h1>
-                        <input class="" placeholder="Chat config name..." ref={cc_name_ref}/>
-                        <button class="mainapp-button" onclick={new_cc_callback}>{"New Chat Configuration"}</button>
+                        <input class="standard-padding-margin-corners most-horizontal-space-no-flex" placeholder="Chat config name..." ref={cc_name_ref}/>
+                        <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={new_cc_callback}>{"New Chat Configuration"}</button>
                         <hr/>
 
-                        <div class="list-holder">
+                        <div class="list-holder most-horizontal-space-no-flex">
                             {
                                 if client_database.configs.get_configs().len() > 0 {
                                     ccs_htmls
@@ -1478,7 +1474,7 @@ pub fn app_page() -> Html {
                             }
                         </div>
                     </div>
-                    <div class="sidebar">
+                    <div class="all-vertical-space standard-padding-margin-corners first-level at-most-a-sixth-width">
                         <h1>{"Configuration settings"}</h1>
                         <h2>
                         {
@@ -1488,7 +1484,7 @@ pub fn app_page() -> Html {
                             }
                         }
                         </h2>
-                        <select class="menu-item" ref={cc_setting_ref} onchange={select_settings_callback}>
+                        <select class="most-horizontal-space-no-flex standard-padding-margin-corners" ref={cc_setting_ref} onchange={select_settings_callback}>
                             <option value={"Temperature"}>{"Temperature"}</option>
                             <option value={"System prompt"}>{"System prompt"}</option>
                             <option value={"Initial Pre-prompt"}>{"Initial Pre-prompt"}</option>
@@ -1499,25 +1495,25 @@ pub fn app_page() -> Html {
                         </select>
                         <hr/>
 
-                        <div class="list-holder">
+                        <div class="list-holder most-horizontal-space-no-flex">
                             {
                                 chosen_cc_settings_htmls
                             }
                         </div>
                     </div>
-                    <div class="not-sidebar chat-tab-not-sidebar">
+                    <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
                         <h1> 
                         {"Modifying settings here"}
                         </h1>
-                        <div class="multi-input-container">
+                        <div class="multi-input-container standard-padding-margin-corners">
                             {setting_config}
                             
                         </div>
 
-                        <div class="label-input-combo bottom-bar">
+                        <div class="label-input-combo bottom-bar most-horizontal-space-no-flex">
                             {
                                 match (*setting_in_modification).clone() {
-                                    Some(setting) => html!(<button class="mainapp-button" onclick={add_update_settings_callback}>
+                                    Some(setting) => html!(<button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={add_update_settings_callback}>
                                         {
                                             match current_cursors.chosen_setting {
                                                 Some(tag) => {"Update setting".to_string()},
