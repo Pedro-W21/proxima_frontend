@@ -19,6 +19,7 @@ getrandom = { version = "0.3.3", features = ["wasm_js"] }
 reqwest = { version = "0.12", features = ["json"] }
 selectrs = { version = "0.0.2", features = ["yew"] }
 markdown = "1.0.0"
+chrono = {version = "0.4.38", features = ["serde"]}
 
 [workspace]
 members = ["src-tauri"]

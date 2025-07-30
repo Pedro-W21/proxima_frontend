@@ -1,12 +1,13 @@
 use std::{collections::HashSet, path::PathBuf, thread, time::Duration};
 
+use chrono::Utc;
 use reqwest::header::{HeaderMap, HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use yew::{html::ChildrenProps, prelude::*, virtual_dom::VNode};
 use gloo_utils::format::JsValueSerdeExt;
-use proxima_backend::{ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, database::{access_modes::AccessMode, chats::{Chat, SessionType}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
+use proxima_backend::{ai_interaction::{endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, tools::{ProximaTool, Tools}}, database::{access_modes::AccessMode, chats::{Chat, SessionType}, configuration::{ChatConfiguration, ChatSetting}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
 use yew::prelude::*;
 use selectrs::yew::{Select, Group};
 use markdown::to_html;
@@ -268,12 +269,19 @@ pub fn app_page() -> Html {
     let chosen_access_mode = use_state_eq(|| {0_usize});
     let chosen_tags_for_am = use_state_eq(|| {HashSet::<TagID>::new()});
     let chosen_am_for_creation:UseStateHandle<Option<usize>> = use_state_eq(|| None);
+    let cc_in_modification:UseStateHandle<Option<usize>> = use_state_eq(|| None);
+    let cc_in_use:UseStateHandle<Option<usize>> = use_state_eq(|| None);
+    let setting_in_modification:UseStateHandle<Option<ChatSetting>> = use_state_eq(|| None);
 
     let pseudo_node_ref = use_node_ref();
     let prompt_node_ref = use_node_ref();
     let tag_desc_ref = use_node_ref();
     let tag_name_ref = use_node_ref();
     let am_name_ref = use_node_ref();
+    let cc_select_ref = use_node_ref();
+    let cc_name_ref = use_node_ref();
+    let cc_setting_ref = use_node_ref();
+    let cc_setting_value_ref = use_node_ref();
     let second_db_here = client_database.clone();
     let current_app = match *(chosen_tab.clone()) {
         /*Home*/ 0 => {
@@ -298,7 +306,7 @@ pub fn app_page() -> Html {
                     .value();
                     let starting_context = WholeContext::new(vec![ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User)]);
                     let mut database_copy = (*client_database).clone();
-                    let mut local_id = database_copy.chats.create_chat(starting_context.clone(), None, proxima_state.device_id);
+                    let mut local_id = database_copy.chats.create_chat(starting_context.clone(), None, proxima_state.device_id, None);
                     let start_chat = database_copy.chats.get_chats().get(&local_id).unwrap().clone();
                     client_database.set(database_copy.clone());
                     let proxima_state = proxima_state.clone();
@@ -329,7 +337,7 @@ pub fn app_page() -> Html {
                             };
                         }
 
-                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: false, session_type: SessionType::Chat, personal_context:None });
+                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: false, session_type: SessionType::Chat, chat_settings:None });
                         
 
                         let value = make_ai_request(json_request, proxima_state.chat_url.clone()).await;
@@ -406,6 +414,7 @@ pub fn app_page() -> Html {
                 let client_database = client_database.clone();
                 let chosen_chat = chosen_chat.clone();
                 let chosen_tab = chosen_tab.clone();
+                let cc_in_use = cc_in_use.clone();
                 let chosen_access_mode = chosen_access_mode.clone();
                 let user_cursors = user_cursors.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
@@ -415,19 +424,51 @@ pub fn app_page() -> Html {
                     prompt.cast::<web_sys::HtmlInputElement>()
                     .unwrap().set_value("");
                     let mut database_copy = (*client_database).clone();
-                    let (mut local_id, starting_context, created, start_chat) = match *(chosen_chat.clone()) {
+                    let (mut local_id, starting_context, created, start_chat, config_opt) = match *(chosen_chat.clone()) {
                         Some(chatid) => {
                             let mut chat = database_copy.chats.get_chats_mut().get_mut(&chatid).unwrap();
-                            chat.add_to_context(ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User));
-                            (chatid, chat.get_context().clone(), false, chat.clone())
+                            let (context_part, config_opt) = match *cc_in_use {
+                                Some(config) => {
+                                    chat.config = Some(config);
+                                    let config_clone = database_copy.configs.get_configs()[config].clone();
+                                    chat.latest_used_config = Some(config_clone.clone());
+                                    match &config_clone.tools {
+                                        Some(tools) => {
+                                            (ContextPart::new_user_prompt_with_tools(vec![ContextData::Text(prompt_text)]), Some(config_clone))
+                                        },
+                                        None => (ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User), Some(config_clone))
+                                    }
+                                },
+                                None => {
+                                    chat.config = None;
+                                    chat.latest_used_config = None;
+                                    (ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User), None)
+                                }
+                            };
+                            chat.add_to_context(context_part);
+                            (chatid, chat.get_context().clone(), false, chat.clone(), config_opt)
                         },
                         None => {
-                            let starting_context = WholeContext::new(vec![ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User)]);
-                            let new_chatid = database_copy.chats.create_chat(starting_context.clone(), None, proxima_state.device_id);
+                            let (starting_context, config_opt) = match *cc_in_use {
+                                Some(config) => {
+                                    let config_clone = database_copy.configs.get_configs()[config].clone();
+                                    match config_clone.tools.clone() {
+                                        Some(tools) => {
+                                            (WholeContext::new_with_all_settings(vec![ContextPart::new_user_prompt_with_tools(vec![ContextData::Text(prompt_text)])], &config_clone), Some(config_clone))
+                                        },
+                                        None => (WholeContext::new_with_all_settings(vec![ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User)], &config_clone), Some(config_clone))
+                                    }
+                                },
+                                None => {
+                                    (WholeContext::new(vec![ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User)]), None)
+                                }
+                            };
+                            let new_chatid = database_copy.chats.create_chat(starting_context.clone(), None, proxima_state.device_id, config_opt.clone());
 
-                            database_copy.chats.get_chats_mut().get_mut(&new_chatid).unwrap().access_modes.insert(*chosen_access_mode);
+                            let mut chats = database_copy.chats.get_chats_mut().get_mut(&new_chatid).unwrap();
+                            chats.access_modes.insert(*chosen_access_mode);
                             chosen_chat.set(Some(new_chatid));
-                            (new_chatid, starting_context, true, database_copy.chats.get_chats_mut().get_mut(&new_chatid).unwrap().clone())
+                            (new_chatid, starting_context, true, database_copy.chats.get_chats_mut().get_mut(&new_chatid).unwrap().clone(), config_opt)
                         }
                     };
                     chosen_tab.set(1);
@@ -458,7 +499,7 @@ pub fn app_page() -> Html {
                             }
                         }
 
-                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: false, session_type: SessionType::Chat, personal_context:None });
+                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: false, session_type: SessionType::Chat, chat_settings:config_opt });
 
 
                         let value = make_ai_request(json_request, proxima_state.chat_url.clone()).await;
@@ -477,6 +518,17 @@ pub fn app_page() -> Html {
                                         }
                                         client_database.set(db);
                                     },
+                                    EndpointResponseVariant::MultiTurnBlock(whole_context) => {
+                                        let mut db = database_copy;
+                                        let chat = db.chats.get_chats_mut().get_mut(&local_id).unwrap();
+                                        chat.context = whole_context;
+                                        let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
+                                        match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                            Ok(response) => (),
+                                            Err(()) => ()
+                                        }
+                                        client_database.set(db);
+                                    }
                                     _ => ()
                                 }
                             },
@@ -521,6 +573,40 @@ pub fn app_page() -> Html {
                 }
             }).collect::<Html>();
             let chosen_chat_by_id = client_database.chats.get_chats().get(&(chosen_chat.unwrap_or(1000000)));
+            let config_htmls:Vec<Html> = second_db_here.configs.get_configs().iter().enumerate().map(|(id, config)| {
+                html!(
+                    <option value={config.name.clone()}>{config.name.clone()}</option>
+                )
+            }).collect();
+
+            let cc_select_callback = {
+                let cc_in_use = cc_in_use.clone();
+                let select_node = cc_select_ref.clone();
+                let db_clone = second_db_here.clone();
+                Callback::from(move |mouse_evt:Event| {
+                    let mut db_copy = (*db_clone).clone();
+                    let cc_name = select_node.cast::<web_sys::HtmlInputElement>()
+                    .unwrap()
+                    .value();
+                    match db_copy.configs.get_configs().iter().enumerate().find(|(i,config)| {
+                        &config.name == &cc_name
+                    }) {
+                        Some((id, config)) => {
+                            let second_db_clone = db_clone.clone();
+                            let config_data = format!("{:?} {:?}", config.raw_settings.clone(), config.tools.is_some());
+                            cc_in_use.set(Some(id));
+                            spawn_local(async move {
+                                let args = serde_wasm_bindgen::to_value(&PrintArgs {value:config_data}).unwrap();
+                                invoke("print_to_console", args).await;
+                            });
+                        },
+                        None => {
+                            cc_in_use.set(None);
+                        }
+                    }
+                    
+                })
+            };
             html!{
                 <div class="chat-part">
                     <div class="sidebar">
@@ -588,6 +674,10 @@ pub fn app_page() -> Html {
                             <input placeholder="Have a prompt ?" ref={prompt_node_ref}/>
 
                             <button class="mainapp-button" onclick={prompt_send_callback}>{"Send"}</button>
+                            <select class="menu-item" ref={cc_select_ref} onchange={cc_select_callback}>
+                                <option value="NO CHAT CONFIG WHATSOEVER (please do not use this magic name for a real chat config)">{"None"}</option>
+                                {config_htmls}
+                            </select>
                         </div>
                     </div>
                     
@@ -738,6 +828,8 @@ pub fn app_page() -> Html {
                 })
             };
 
+            
+
             html!{
                 <div class="chat-part">
                     <div class="sidebar">
@@ -765,6 +857,7 @@ pub fn app_page() -> Html {
                         }
                         </h1>
                         <div class="multi-input-container">
+                            
                             <div class="label-input-combo">
                                 <p>{"Tag name (obligatory) : "}</p>
                                 <input placeholder="Enter a tag name here..." ref={tag_name_ref}/>
@@ -794,6 +887,7 @@ pub fn app_page() -> Html {
                                     }
                                 </div>
                             </div>
+                            
                             
                         </div>
 
@@ -1050,7 +1144,397 @@ pub fn app_page() -> Html {
             }
         },
         /*Files*/ 4 => html!(),
-        /*Settings*/ 5 => html!(),
+        /*Chat Settings*/ 5 => {
+            /* Sidebar with list picker from all possible settings, add button, and then the list of all current settings with removal buttons if necessary */
+            /* The main area is for configuration of a single setting */
+
+            let new_cc_callback = {
+                let user_cursors = user_cursors.clone();
+                let name_ref = cc_name_ref.clone();
+                let client_db = client_database.clone();
+                let proxima_state = proxima_state.clone();
+                let chosen_access_mode = chosen_access_mode.clone();
+                Callback::from(move |mouse_evt:MouseEvent| {
+                    let mut cursors_clone = (*user_cursors).clone();
+                    
+                    let mut db_copy = (*client_db).clone();
+                    let proxima_state = proxima_state.clone();
+                    let name = name_ref.cast::<web_sys::HtmlInputElement>()
+                    .unwrap()
+                    .value();
+                    if !name.trim().is_empty() {
+                        let mut config = ChatConfiguration::new(name, vec![]);
+                        config.access_modes.insert((*chosen_access_mode).clone());
+                        let id = db_copy.configs.add_config(config.clone());
+                        let proxima_state = proxima_state.clone();
+                        let user_cursors = user_cursors.clone();
+                        let client_db = client_db.clone();
+                        spawn_local(async move {
+                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Add(DatabaseItem::ChatConfig(config.clone())) };
+                            let (new_cursors, new_id) = match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                Ok(response) => handle_add(
+                                    &mut db_copy,
+                                    DatabaseItemID::ChatConfiguration(id),
+                                    DatabaseItem::ChatConfig(config),
+                                    response.reply,
+                                    (*user_cursors).clone(),
+                                    async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
+                                ).await,
+                                Err(()) => ((*user_cursors).clone(), DatabaseItemID::ChatConfiguration(id))
+                            };
+                            user_cursors.set(new_cursors);
+                            client_db.set(db_copy);
+                        });
+                    }
+                    
+                })
+            };
+            let ccs_htmls = client_database.configs.get_configs().iter().enumerate().map(|(id, config)| {
+                let user_cursors = user_cursors.clone();
+                let chosen_access_mode = chosen_access_mode.clone();
+                let callback = {
+
+                    let setting_in_modification = setting_in_modification.clone();
+                    let second_db = client_database.clone();
+                    let user_cursors = user_cursors.clone();
+                    let chosen_tags = chosen_tags_for_am.clone();
+                    let id_clone = id;
+                    Callback::from(move |mouse_evt:MouseEvent| {
+                        let mut cursors_clone = (*user_cursors).clone();
+                        cursors_clone.config_for_modification = Some(id_clone);
+                        cursors_clone.chosen_setting = None;
+                        setting_in_modification.set(None);
+                        
+                        user_cursors.set(cursors_clone);
+                    })
+                };
+                if !config.access_modes.contains(&*chosen_access_mode) {
+                    html!()
+                }
+                else if user_cursors.config_for_modification.is_some() && id == user_cursors.config_for_modification.unwrap() {
+                    html!(
+
+                        <div><button onclick={callback} class="chat-option chosen-chat">{config.name.clone()}</button></div>
+                    )
+                }
+                else {
+                    html!(
+                        <div><button onclick={callback} class="chat-option">{config.name.clone()}</button></div>
+                    )
+                }
+            }).collect::<Html>();
+
+            let current_cursors = (*user_cursors).clone();
+
+                let setting_in_modification = setting_in_modification.clone();
+            let chosen_cc_settings_htmls = match current_cursors.config_for_modification {
+                Some(config_id) => {
+                    let client_db = client_database.clone();
+                    client_db.configs.get_configs()[config_id].raw_settings.iter().enumerate().map(|(id, setting)| {
+
+                        let setting_in_modification = setting_in_modification.clone();
+                        let user_cursors = user_cursors.clone();
+                        let setting_c = setting.clone();
+                        let callback = {
+
+                            let second_db = client_database.clone();
+                            let user_cursors = user_cursors.clone();
+                            let chosen_tags = chosen_tags_for_am.clone();
+                            let id_clone = id;
+                            let setting_clone = setting_c.clone();
+                            Callback::from(move |mouse_evt:MouseEvent| {
+                                let mut cursors_clone = (*user_cursors).clone();
+                                cursors_clone.chosen_setting = Some(id_clone);
+                                setting_in_modification.set(Some(setting_clone.clone()));
+                                user_cursors.set(cursors_clone);
+                            })
+                        };
+                        if user_cursors.chosen_setting.is_some() && id == user_cursors.chosen_setting.unwrap() {
+                            html!(
+
+                                <div><button onclick={callback} class="chat-option chosen-chat">{setting.get_title()}</button></div>
+                            )
+                        }
+                        else {
+                            html!(
+                                <div><button onclick={callback} class="chat-option">{setting.get_title()}</button></div>
+                            )
+                        }
+                    }).collect::<Html>()
+                },
+                None => if client_database.configs.get_configs().len() > 0 {
+                    html!({"Please pick a configuration to modify"})
+                }
+                else {
+                    html!({"Please create a configuration to add settings to it"})
+                },
+            };
+
+            let select_settings_callback = {
+                let chosen_access_mode = chosen_access_mode.clone();
+                let select_node = cc_setting_ref.clone();
+                let db_clone = second_db_here.clone();
+                let user_cursors = user_cursors.clone();
+                let chosen_chat = chosen_chat.clone();
+                let chosen_tag = chosen_tag.clone();
+                let chosen_parent_tag = chosen_parent_tag.clone();
+                let setting_in_modification = setting_in_modification.clone();
+                Callback::from(move |mouse_evt:Event| {
+                    let mut db_copy = (*db_clone).clone();
+                    let selected_setting_string = select_node.cast::<web_sys::HtmlInputElement>()
+                    .unwrap()
+                    .value();
+                    setting_in_modification.set(match selected_setting_string.trim() {
+                        "Temperature" => Some(ChatSetting::Temperature(700)),
+                        "System prompt" => Some(ChatSetting::SystemPrompt(ContextPart::new(vec![], ContextPosition::System))),
+                        "Initial Pre-prompt" => Some(ChatSetting::PrePrompt(ContextPart::new(vec![], ContextPosition::User))),
+                        "Pre-prompt at chat end" => Some(ChatSetting::PrePromptBeforeLatest(ContextPart::new(vec![], ContextPosition::User))),
+                        "Max context length" => Some(ChatSetting::MaxContextLength(10000)),
+                        "Max response length" => Some(ChatSetting::ResponseTokenLimit(10000)),
+                        "Tool" => Some(ChatSetting::Tool(ProximaTool::Calculator)),
+                        _ => None
+                    });
+                    let mut cursors_copy = (*user_cursors).clone();
+                    cursors_copy.chosen_setting = None;
+                    user_cursors.set(cursors_copy);
+                })
+            };
+
+            let add_update_settings_callback = {
+                let user_cursors = user_cursors.clone();
+                let cc_setting_value_ref = cc_setting_value_ref.clone();
+                let client_db = client_database.clone();
+                let proxima_state = proxima_state.clone();
+                let setting_in_modification = setting_in_modification.clone();
+                Callback::from(move |mouse_evt:MouseEvent| {
+                    let mut cursors_clone = (*user_cursors).clone();
+                    let cc_setting_value_ref = cc_setting_value_ref.clone();
+                    let mut db_copy = (*client_db).clone();
+                    let proxima_state = proxima_state.clone();
+                    let new_setting = match (*setting_in_modification).clone() {
+                        Some(setting) => match setting {
+                            ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
+                                ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
+                                ], ContextPosition::User)),
+                            ChatSetting::PrePromptBeforeLatest(prompt) => ChatSetting::PrePromptBeforeLatest(ContextPart::new(vec![
+                                ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
+                                ], ContextPosition::User)),
+                            ChatSetting::Temperature(temp) => ChatSetting::Temperature(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                            ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
+                                ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
+                                ], ContextPosition::System)),
+                            ChatSetting::Tool(tool) => ChatSetting::Tool(match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                "Calculator" => ProximaTool::Calculator,
+                                "Local Memory" => ProximaTool::LocalMemory,
+                                _ => panic!("Impossible")
+                            }),
+                            ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                            ChatSetting::ResponseTokenLimit(limit) => ChatSetting::ResponseTokenLimit(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                            ChatSetting::AccessMode(access_mode) => {
+                                let access_mode_name = cc_setting_value_ref.cast::<web_sys::HtmlInputElement>()
+                                .unwrap()
+                                .value();
+                                match db_copy.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+                                    access_mode.get_name() == &access_mode_name
+                                }) {
+                                    Some((i, access_mode)) => {
+                                        ChatSetting::AccessMode(i)
+                                    },
+                                    None => panic!("What")
+                                }
+                            }
+                        },
+                        None => {
+                            panic!("Impossible, the button should only exist if this is Some(...)")
+                        }
+                    };
+                    let setting_in_modification = setting_in_modification.clone();
+                    setting_in_modification.set(Some(new_setting.clone()));
+                    match cursors_clone.config_for_modification {
+                        Some(config_id) => {
+                            let proxima_state = proxima_state.clone();
+                            let user_cursors = user_cursors.clone();
+                            let client_db = client_db.clone();
+                            spawn_local(async move {
+                                let mut config = db_copy.configs.get_configs()[config_id].clone();
+                                let mut cursors_clone = (*user_cursors).clone();
+
+                                match cursors_clone.chosen_setting {
+                                    Some(setting) => {
+                                        config.raw_settings[setting] = new_setting.clone();
+                                    },
+                                    None => {
+                                        cursors_clone.chosen_setting = Some(config.raw_settings.len());
+                                        config.raw_settings.push((new_setting.clone()));
+                                    },
+                                }
+                                config.tools = Tools::try_from_settings(config.raw_settings.clone());
+                                config.last_updated = Utc::now();
+                                db_copy.configs.update_config(config.clone());
+                                let proxima_state = proxima_state.clone();
+                                spawn_local(async move {
+                                    let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::ChatConfig(config)) };
+                                    match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                        Ok(response) => (),
+                                        Err(()) => ()
+                                    }
+                                });
+                                client_db.set(db_copy);
+                                user_cursors.set(cursors_clone);
+                            });
+                        },
+                        None => ()
+                    }
+                        
+                    
+                })
+            };
+            let setting_config = {
+                match (*setting_in_modification).clone() {
+                    Some(setting) => match setting {
+                        ChatSetting::PrePrompt(prompt) => html!(
+                            <div class="label-input-combo">
+                                <p>{"Pre-prompt value : "}</p>
+                                <textarea placeholder="Pre-prompt here..." id="pre_pre_prompt" ref={cc_setting_value_ref}/>
+                            </div>
+                        ),
+                        ChatSetting::PrePromptBeforeLatest(prompt) => html!(
+                            <div class="label-input-combo">
+                                <p>{"Pre-prompt added after all of your prompts : "}</p>
+                                <textarea placeholder="Pre-prompt here..." id="pre_prompt" ref={cc_setting_value_ref}/>
+                            </div>
+                        ),
+                        ChatSetting::Temperature(temp) => html!(
+                            <div class="label-input-combo">
+                                <p>{"Temperature : "}</p>
+                                <input type="range" id="temp_slider" min="0" max="1000" step="1" ref={cc_setting_value_ref} />
+                            </div>
+                        ),
+                        ChatSetting::SystemPrompt(prompt) => html!(
+                            <div class="label-input-combo">
+                                <p>{"System prompt part : "}</p>
+                                <textarea placeholder="System prompt here..." id="system_prompt" ref={cc_setting_value_ref}/>
+                            </div>
+                        ),
+                        ChatSetting::Tool(tool) => html!(
+                            <div class="label-input-combo">
+                                <p>{"System prompt part : "}</p>
+                                <select class="menu-item" id="tool_select" ref={cc_setting_value_ref}>
+                                    <option value={"Calculator"}>{"Calculator"}</option>
+                                    <option value={"Local Memory"}>{"Local Memory"}</option>
+                                </select>
+                            </div>
+                        ),
+                        ChatSetting::MaxContextLength(length) => html!(
+                            <div class="label-input-combo">
+                                <p>{"Max context length (in tokens) : "}</p>
+                                <input type="range" id="context_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
+                            </div>
+                        ),
+                        ChatSetting::ResponseTokenLimit(limit) => html!(
+                            <div class="label-input-combo">
+                                <p>{"Max response length (in tokens) : "}</p>
+                                <input type="range" id="response_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
+                            </div>
+                        ),
+                        ChatSetting::AccessMode(access_mode) => {
+                            let access_modes_htmls:Vec<Html> = second_db_here.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
+                                html!(
+                                    <option value={access_mode.get_name().clone()}>{access_mode.get_name().clone()}</option>
+                                )
+                            }).collect();
+
+                            html!(
+                                <div class="label-input-combo">
+                                    <p>{"System prompt part : "}</p>
+                                    <select class="menu-item" id="access_select" ref={cc_setting_value_ref}>
+                                        {access_modes_htmls}
+                                    </select>
+                                </div>
+                            )
+                        }
+                    },
+                    None => {
+                        html!({"Choose a setting to add or modify to configure its attribute(s)"})
+                    }
+                }
+            };
+            html!(
+                <div class="chat-part">
+                    <div class="sidebar">
+                        <h1>{"Chat configurations"}</h1>
+                        <input class="" placeholder="Chat config name..." ref={cc_name_ref}/>
+                        <button class="mainapp-button" onclick={new_cc_callback}>{"New Chat Configuration"}</button>
+                        <hr/>
+
+                        <div class="list-holder">
+                            {
+                                if client_database.configs.get_configs().len() > 0 {
+                                    ccs_htmls
+                                }
+                                else {
+                                    html!({"To create a chat configuration, please give it a non-empty name and click \"New Configuration\" above"})
+                                }
+                            }
+                        </div>
+                    </div>
+                    <div class="sidebar">
+                        <h1>{"Configuration settings"}</h1>
+                        <h2>
+                        {
+                            match user_cursors.config_for_modification {
+                                Some(config) => html!({format!("For : {}", client_database.configs.get_configs()[config].name.clone())}),
+                                None => html!()
+                            }
+                        }
+                        </h2>
+                        <select class="menu-item" ref={cc_setting_ref} onchange={select_settings_callback}>
+                            <option value={"Temperature"}>{"Temperature"}</option>
+                            <option value={"System prompt"}>{"System prompt"}</option>
+                            <option value={"Initial Pre-prompt"}>{"Initial Pre-prompt"}</option>
+                            <option value={"Pre-prompt at chat end"}>{"Pre-prompt at chat end"}</option>
+                            <option value={"Max context length"}>{"Max context length"}</option>
+                            <option value={"Max response length"}>{"Max response length"}</option>
+                            <option value={"Tool"}>{"Tool"}</option>
+                        </select>
+                        <hr/>
+
+                        <div class="list-holder">
+                            {
+                                chosen_cc_settings_htmls
+                            }
+                        </div>
+                    </div>
+                    <div class="not-sidebar chat-tab-not-sidebar">
+                        <h1> 
+                        {"Modifying settings here"}
+                        </h1>
+                        <div class="multi-input-container">
+                            {setting_config}
+                            
+                        </div>
+
+                        <div class="label-input-combo bottom-bar">
+                            {
+                                match (*setting_in_modification).clone() {
+                                    Some(setting) => html!(<button class="mainapp-button" onclick={add_update_settings_callback}>
+                                        {
+                                            match current_cursors.chosen_setting {
+                                                Some(tag) => {"Update setting".to_string()},
+                                                None => "Add setting".to_string()    
+                                            }
+                                        }
+                                        </button>
+                                    ),
+                                    None => html!({"Choose a setting to add or modify for more fun !!!"})
+                                }
+                            }
+                            
+                        </div>
+                    </div>
+                </div>
+            )
+        },
         _ => html!({"Something is very wrong"})
     };
     let access_mode_select = use_node_ref();

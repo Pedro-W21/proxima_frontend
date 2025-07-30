@@ -27,12 +27,15 @@ pub struct UserCursors {
     pub access_mode_for_modification:Option<usize>,
     pub chosen_tag:Option<usize>,
     pub chosen_parent_tag:Option<usize>,
+    pub chosen_config:Option<usize>,
+    pub config_for_modification:Option<usize>,
+    pub chosen_setting:Option<usize>,
     pub chosen_access_mode_tags:HashSet<usize>,
 }
 
 impl UserCursors {
     pub fn zero() -> Self {
-        Self { chosen_chat: None, chosen_access_mode: 0, access_mode_for_modification: None, chosen_tag: None, chosen_parent_tag: None, chosen_access_mode_tags: HashSet::new() }
+        Self { chosen_chat: None, chosen_access_mode: 0, access_mode_for_modification: None, chosen_tag: None, chosen_parent_tag: None, chosen_access_mode_tags: HashSet::new(), chosen_config:None, config_for_modification:None, chosen_setting:None }
     }
     pub fn from_state(
         chosen_chat:Option<usize>,
@@ -40,9 +43,12 @@ impl UserCursors {
         access_mode_for_modification:Option<usize>,
         chosen_tag:Option<usize>,
         chosen_parent_tag:Option<usize>,
+        chosen_config:Option<usize>,
+        chosen_setting:Option<usize>,
+        config_for_modification:Option<usize>,
         chosen_access_mode_tags:HashSet<usize>
     ) -> Self {
-        Self { chosen_chat, chosen_access_mode, access_mode_for_modification, chosen_tag, chosen_parent_tag, chosen_access_mode_tags }
+        Self { chosen_chat, chosen_access_mode, access_mode_for_modification, chosen_tag, chosen_parent_tag, chosen_access_mode_tags, chosen_config, config_for_modification, chosen_setting }
     }
 }
 
@@ -142,6 +148,28 @@ pub fn apply_server_updates(client_db: &mut ProxDatabase, updates:Vec<(DatabaseI
                         new_cursors.chosen_access_mode_tags = new_set;
                     }
                     
+                }
+            },
+            DatabaseItem::ChatConfig(config) => {
+                if config.id >= client_db.configs.get_configs().len() {
+                    client_db.configs.add_config(config);
+                }
+                else {
+                    let id = config.id;
+                    if !client_db.insert_or_update(DatabaseItem::ChatConfig(config)) {
+                        match cursors.chosen_config {
+                            Some(config_id) => if config_id >= id {
+                                new_cursors.chosen_config = Some(config_id + 1);
+                            },
+                            None => ()
+                        }
+                        match cursors.config_for_modification {
+                            Some(config_id) => if config_id >= id {
+                                new_cursors.config_for_modification = Some(config_id + 1);
+                            },
+                            None => ()
+                        }
+                    }
                 }
             },
             DatabaseItem::UserData(user_data) => {
