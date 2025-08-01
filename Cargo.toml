@@ -20,6 +20,10 @@ reqwest = { version = "0.12", features = ["json"] }
 selectrs = { version = "0.0.2", features = ["yew"] }
 markdown = "1.0.0"
 chrono = {version = "0.4.38", features = ["serde"]}
+gloo-events = "0.2.0"
+tauri-sys = { git = "https://github.com/JonasKruckenberg/tauri-sys", branch = "v2", features = ["all"] }
+futures = "0.3.31"
+
 
 [workspace]
 members = ["src-tauri"]

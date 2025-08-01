@@ -1,16 +1,19 @@
 use std::{collections::HashSet, path::PathBuf, thread, time::Duration};
 
 use chrono::Utc;
+use gloo_events::EventListener;
 use reqwest::header::{HeaderMap, HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
-use yew::{html::ChildrenProps, prelude::*, virtual_dom::VNode};
+use yew::{html::ChildrenProps, platform::pinned::mpsc::UnboundedSender, prelude::*, virtual_dom::VNode};
 use gloo_utils::format::JsValueSerdeExt;
-use proxima_backend::{ai_interaction::{endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, tools::{ProximaTool, Tools}}, database::{access_modes::AccessMode, chats::{Chat, SessionType}, configuration::{ChatConfiguration, ChatSetting}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
+use proxima_backend::{ai_interaction::{endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, tools::{ProximaTool, Tools}}, database::{access_modes::AccessMode, chats::{Chat, ChatID, SessionType}, configuration::{ChatConfiguration, ChatSetting}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
 use yew::prelude::*;
 use selectrs::yew::{Select, Group};
 use markdown::to_html;
+use web_sys::{EventTarget, HtmlElement};
+use futures::StreamExt;
 
 use crate::db_sync::{handle_add, UserCursors};
 
@@ -46,7 +49,7 @@ pub struct HttpDBPostRequest {
 #[derive(Serialize, Deserialize)]
 pub struct HttpAIPostRequest {
     request:AIPayload,
-    url:String,
+    second:SecondArgument
 }
 
 #[derive(Serialize, Deserialize)]
@@ -184,8 +187,16 @@ async fn make_db_request(payload:DBPayload, backend_url:String) -> Result<DBResp
     value.map_err(|error| {})
 }
 
-async fn make_ai_request(payload:AIPayload, backend_url:String) -> Result<AIResponse, ()> {
-    let args = serde_wasm_bindgen::to_value(&HttpAIPostRequest {request:payload, url:backend_url + "/ai"}).unwrap();
+
+#[derive(Serialize, Deserialize)]
+pub struct SecondArgument {
+    url:String,
+    chat_id:ChatID
+}
+
+
+async fn make_ai_request(payload:AIPayload, backend_url:String, chat_id:ChatID) -> Result<AIResponse, ()> {
+    let args = serde_wasm_bindgen::to_value(&HttpAIPostRequest {request:payload, second:SecondArgument { url: backend_url + "/ai", chat_id }}).unwrap();
 
     let return_val = invoke("ai_endpoint_post_request", args).await;
     
@@ -208,10 +219,19 @@ pub fn loading_page() -> Html {
     }
 }
 
+pub struct DatabaseState {
+    db:ProxDatabase,
+}
+
+enum DatabaseEvent {
+
+}
+
 #[function_component(MainPage)]
 pub fn app_page() -> Html {
     let chosen_tab = use_state_eq(|| 0_usize);
     let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
+    let db_state = use_reducer_eq(ProximaState::default);
     let client_database = use_state_eq(|| {ProxDatabase::new_just_data(proxima_state.username.clone(), String::from("Don't care, local"))});
     let got_start = use_state_eq(|| false);
     let user_cursors = use_state_eq(|| UserCursors::zero());
@@ -232,6 +252,87 @@ pub fn app_page() -> Html {
             
         });
     }
+
+    let event_div_node_ref = use_node_ref();
+
+    let second_db = client_database.clone();
+
+    use_effect_with(
+        event_div_node_ref.clone(),
+        {
+            let div_node_ref = event_div_node_ref.clone();
+            let second_db = second_db.clone();
+            let proxima_state = proxima_state.clone();
+            move |_| {
+                let mut custard_listener = None;
+
+                let second_db = second_db.clone();
+                let proxima_state = proxima_state.clone();
+                if let Some(element) = div_node_ref.cast::<HtmlElement>() {
+                    // Create your Callback as you normally would
+                    let oncustard = Callback::from(move |e: Event| {
+                        
+                    });
+                    spawn_local(async move {
+                        let mut listener = tauri_sys::event::listen::<(EndpointResponseVariant, ChatID)>("chat-token").await.unwrap();
+                        let (mut listener, mut abort_handle) = futures::stream::abortable(listener);
+                        while let Some(raw_event) = listener.next().await {
+                            let event = raw_event.payload.0;
+                            let chat_id = raw_event.payload.1;
+                            let proxima_state = proxima_state.clone();
+                            let mut db = (*second_db).clone();
+
+                            let mut chat = db.chats.get_chats_mut().get_mut(&chat_id).unwrap();
+
+                            match event {
+                                EndpointResponseVariant::StartStream(data, position) => {
+                                    chat.context.add_part(ContextPart::new(vec![data], position));
+                                },
+                                EndpointResponseVariant::ContinueStream(data, position) => {
+                                    let last_part = chat.context.get_parts_mut().last_mut().unwrap();
+                                    match last_part.get_data_mut().last_mut().unwrap() {
+                                        ContextData::Text(text) => {
+                                            match data {
+                                                ContextData::Text(new_text) => *text += &new_text,
+                                                ContextData::Image(image) => last_part.add_data(ContextData::Image(image)),
+                                            }
+                                        },
+                                        ContextData::Image(image) => {
+                                            last_part.add_data(data);
+                                        }
+                                    } 
+                                },
+                                EndpointResponseVariant::EndStream(data, position) => {
+                                    panic!("Odd, not supposed to get that yet");
+                                },
+                                _ => panic!("Impossible to get that here")
+                            }
+                            let chat_clone = chat.clone();
+                            second_db.set(db);
+                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("GOT THERE IN EVENT YAHOOO")}).unwrap();
+                            invoke("print_to_console", args).await;
+                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat_clone)) };
+                            match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                Ok(response) => (),
+                                Err(()) => ()
+                            }
+                        }
+                    });
+                    // Create a Closure from a Box<dyn Fn> - this has to be 'static
+                    let listener = EventListener::new(
+                        &element,
+                        "chat-token",
+                        move |e| oncustard.emit(e.clone())
+                    );
+
+                    custard_listener = Some(listener);
+                }
+
+                move || drop(custard_listener)
+            }
+        }
+    );
+    
     
     /*let database_data = use_state_eq(|| SharedProximaData::new());
     {  
@@ -342,7 +443,7 @@ pub fn app_page() -> Html {
                         let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: false, session_type: SessionType::Chat, chat_settings:None });
                         
 
-                        let value = make_ai_request(json_request, proxima_state.chat_url.clone()).await;
+                        let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
 
                         match value {
                             Ok(response) => {
@@ -499,43 +600,48 @@ pub fn app_page() -> Html {
                                     _ => panic!("Wrong kind of ID after check, impossible")
                                 };
                             }
+                            client_database.set(database_copy.clone());
                         }
 
-                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: false, session_type: SessionType::Chat, chat_settings:config_opt });
+                        let streaming = false;
+
+                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming, session_type: SessionType::Chat, chat_settings:config_opt });
 
 
-                        let value = make_ai_request(json_request, proxima_state.chat_url.clone()).await;
-
-                        match value {
-                            Ok(response) => {
-                                match response.reply {
-                                    EndpointResponseVariant::Block(context_part) => {
-                                        let mut db = database_copy;
-                                        let chat = db.chats.get_chats_mut().get_mut(&local_id).unwrap();
-                                        chat.add_to_context(context_part);
-                                        let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
-                                        match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                            Ok(response) => (),
-                                            Err(()) => ()
+                        let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
+                        if !streaming {
+                            match value {
+                                Ok(response) => {
+                                    match response.reply {
+                                        EndpointResponseVariant::Block(context_part) => {
+                                            let mut db = database_copy;
+                                            let chat = db.chats.get_chats_mut().get_mut(&local_id).unwrap();
+                                            chat.add_to_context(context_part);
+                                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
+                                            match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                                Ok(response) => (),
+                                                Err(()) => ()
+                                            }
+                                            client_database.set(db);
+                                        },
+                                        EndpointResponseVariant::MultiTurnBlock(whole_context) => {
+                                            let mut db = database_copy;
+                                            let chat = db.chats.get_chats_mut().get_mut(&local_id).unwrap();
+                                            chat.context = whole_context;
+                                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
+                                            match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                                Ok(response) => (),
+                                                Err(()) => ()
+                                            }
+                                            client_database.set(db);
                                         }
-                                        client_database.set(db);
-                                    },
-                                    EndpointResponseVariant::MultiTurnBlock(whole_context) => {
-                                        let mut db = database_copy;
-                                        let chat = db.chats.get_chats_mut().get_mut(&local_id).unwrap();
-                                        chat.context = whole_context;
-                                        let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
-                                        match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                            Ok(response) => (),
-                                            Err(()) => ()
-                                        }
-                                        client_database.set(db);
+                                        _ => ()
                                     }
-                                    _ => ()
-                                }
-                            },
-                            Err(_) => ()
+                                },
+                                Err(_) => ()
+                            }
                         }
+                        
 
 
                     });
@@ -595,7 +701,7 @@ pub fn app_page() -> Html {
                     }) {
                         Some((id, config)) => {
                             let second_db_clone = db_clone.clone();
-                            let config_data = format!("{:?} {:?}", config.raw_settings.clone(), config.tools.is_some());
+                            let config_data = format!("{:?} {:?}", config.name.clone(), config.tools.is_some());
                             cc_in_use.set(Some(id));
                             spawn_local(async move {
                                 let args = serde_wasm_bindgen::to_value(&PrintArgs {value:config_data}).unwrap();
@@ -1281,7 +1387,7 @@ pub fn app_page() -> Html {
                     .unwrap()
                     .value();
                     setting_in_modification.set(match selected_setting_string.trim() {
-                        "Temperature" => Some(ChatSetting::Temperature(700)),
+                        "Temperature" => Some(ChatSetting::Temperature(70)),
                         "System prompt" => Some(ChatSetting::SystemPrompt(ContextPart::new(vec![], ContextPosition::System))),
                         "Initial Pre-prompt" => Some(ChatSetting::PrePrompt(ContextPart::new(vec![], ContextPosition::User))),
                         "Pre-prompt at chat end" => Some(ChatSetting::PrePromptBeforeLatest(ContextPart::new(vec![], ContextPosition::User))),
@@ -1294,6 +1400,104 @@ pub fn app_page() -> Html {
                     cursors_copy.chosen_setting = None;
                     user_cursors.set(cursors_copy);
                 })
+            };
+
+            let on_click_callback = {
+                let cc_setting_value_ref = cc_setting_value_ref.clone();
+                let client_db = client_database.clone();
+                let setting_in_modification = setting_in_modification.clone();
+                Callback::from(move |mouse_evt:MouseEvent| {
+                    let cc_setting_value_ref = cc_setting_value_ref.clone();
+                    let db_copy = (*client_db).clone();
+                    let new_setting = match (*setting_in_modification).clone() {
+                        Some(setting) => match setting {
+                            ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
+                                ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
+                                ], ContextPosition::User)),
+                            ChatSetting::PrePromptBeforeLatest(prompt) => ChatSetting::PrePromptBeforeLatest(ContextPart::new(vec![
+                                ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
+                                ], ContextPosition::User)),
+                            ChatSetting::Temperature(temp) => ChatSetting::Temperature(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                            ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
+                                ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
+                                ], ContextPosition::System)),
+                            ChatSetting::Tool(tool) => ChatSetting::Tool(match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                "Calculator" => ProximaTool::Calculator,
+                                "Local Memory" => ProximaTool::LocalMemory,
+                                _ => panic!("Impossible")
+                            }),
+                            ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                            ChatSetting::ResponseTokenLimit(limit) => ChatSetting::ResponseTokenLimit(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                            ChatSetting::AccessMode(access_mode) => {
+                                let access_mode_name = cc_setting_value_ref.cast::<web_sys::HtmlInputElement>()
+                                .unwrap()
+                                .value();
+                                match db_copy.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+                                    access_mode.get_name() == &access_mode_name
+                                }) {
+                                    Some((i, access_mode)) => {
+                                        ChatSetting::AccessMode(i)
+                                    },
+                                    None => panic!("What")
+                                }
+                            }
+                        },
+                        None => {
+                            panic!("Impossible, the button should only exist if this is Some(...)")
+                        }
+                    };
+                    setting_in_modification.set(Some(new_setting));
+                }
+                )
+            };
+
+            let on_change_callback = {
+                let cc_setting_value_ref = cc_setting_value_ref.clone();
+                let client_db = client_database.clone();
+                let setting_in_modification = setting_in_modification.clone();
+                Callback::from(move |mouse_evt:Event| {
+                    let cc_setting_value_ref = cc_setting_value_ref.clone();
+                    let db_copy = (*client_db).clone();
+                    let new_setting = match (*setting_in_modification).clone() {
+                        Some(setting) => match setting {
+                            ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
+                                ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
+                                ], ContextPosition::User)),
+                            ChatSetting::PrePromptBeforeLatest(prompt) => ChatSetting::PrePromptBeforeLatest(ContextPart::new(vec![
+                                ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
+                                ], ContextPosition::User)),
+                            ChatSetting::Temperature(temp) => ChatSetting::Temperature(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                            ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
+                                ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
+                                ], ContextPosition::System)),
+                            ChatSetting::Tool(tool) => ChatSetting::Tool(match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                "Calculator" => ProximaTool::Calculator,
+                                "Local Memory" => ProximaTool::LocalMemory,
+                                _ => panic!("Impossible")
+                            }),
+                            ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                            ChatSetting::ResponseTokenLimit(limit) => ChatSetting::ResponseTokenLimit(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                            ChatSetting::AccessMode(access_mode) => {
+                                let access_mode_name = cc_setting_value_ref.cast::<web_sys::HtmlInputElement>()
+                                .unwrap()
+                                .value();
+                                match db_copy.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+                                    access_mode.get_name() == &access_mode_name
+                                }) {
+                                    Some((i, access_mode)) => {
+                                        ChatSetting::AccessMode(i)
+                                    },
+                                    None => panic!("What")
+                                }
+                            }
+                        },
+                        None => {
+                            panic!("Impossible, the button should only exist if this is Some(...)")
+                        }
+                    };
+                    setting_in_modification.set(Some(new_setting));
+                }
+                )
             };
 
             let add_update_settings_callback = {
@@ -1388,30 +1592,43 @@ pub fn app_page() -> Html {
             let setting_config = {
                 match (*setting_in_modification).clone() {
                     Some(setting) => match setting {
-                        ChatSetting::PrePrompt(prompt) => html!(
-                            <div class="label-input-combo second-level standard-padding-margin-corners">
-                                <p>{"Pre-prompt value : "}</p>
-                                <textarea class="standard-padding-margin-corners" placeholder="Pre-prompt here..." id="pre_pre_prompt" ref={cc_setting_value_ref}/>
-                            </div>
-                        ),
-                        ChatSetting::PrePromptBeforeLatest(prompt) => html!(
-                            <div class="label-input-combo second-level standard-padding-margin-corners">
-                                <p>{"Pre-prompt added after all of your prompts : "}</p>
-                                <textarea class="standard-padding-margin-corners" placeholder="Pre-prompt here..." id="pre_prompt" ref={cc_setting_value_ref}/>
-                            </div>
-                        ),
+                        ChatSetting::PrePrompt(prompt) => 
+                        {
+                            let text = prompt.data_to_text().concat();
+                            html!(
+                                <div class="label-input-combo second-level standard-padding-margin-corners">
+                                    <div><p>{"Pre-prompt value : "}</p></div>
+                                    <div class="label-input-combo"><textarea class="standard-padding-margin-corners" rows="10" onclick={on_click_callback} onchange={on_change_callback} placeholder="Pre-prompt here..." id="pre_pre_prompt" ref={cc_setting_value_ref} defaultvalue={text}/></div>
+                                </div>
+                            )
+                        },
+                        ChatSetting::PrePromptBeforeLatest(prompt) => 
+                        {
+                            let text = prompt.data_to_text().concat();
+                            html!(    
+                                <div class="label-input-combo second-level standard-padding-margin-corners">
+                                    <div><p>{"Pre-prompt added after all of your prompts : "}</p></div>
+                                    <div class="label-input-combo"><textarea class="standard-padding-margin-corners" rows="10" placeholder="Pre-prompt here..." onclick={on_click_callback} onchange={on_change_callback} id="pre_prompt" ref={cc_setting_value_ref} defaultvalue={text}/></div>
+                                </div>
+                            )
+                        },
                         ChatSetting::Temperature(temp) => html!(
                             <div class="label-input-combo second-level standard-padding-margin-corners">
-                                <p>{"Temperature : "}</p>
-                                <input class="standard-padding-margin-corners" type="range" id="temp_slider" min="0" max="1000" step="1" ref={cc_setting_value_ref} />
+                                <p>{format!("Temperature : {}", temp as f64/100.0)}</p>
+                                <input class="standard-padding-margin-corners" onclick={on_click_callback} onchange={on_change_callback} type="range" id="temp_slider" min="0" max="200" step="1" ref={cc_setting_value_ref} />
                             </div>
                         ),
-                        ChatSetting::SystemPrompt(prompt) => html!(
-                            <div class="label-input-combo second-level standard-padding-margin-corners">
-                                <p>{"System prompt part : "}</p>
-                                <textarea class="standard-padding-margin-corners" placeholder="System prompt here..." id="system_prompt" ref={cc_setting_value_ref}/>
-                            </div>
-                        ),
+                        ChatSetting::SystemPrompt(prompt) => 
+                        {
+                            let text = prompt.data_to_text().concat();
+                            html!(
+                                <div class="second-level standard-padding-margin-corners">
+                                    <div><p>{"System prompt part : "}</p></div>
+                                    
+                                    <div class="label-input-combo"><textarea class="standard-padding-margin-corners" rows="10" onclick={on_click_callback} onchange={on_change_callback} placeholder="System prompt here..." id="system_prompt" ref={cc_setting_value_ref} defaultvalue={text}/></div>
+                                </div>
+                            )
+                        },
                         ChatSetting::Tool(tool) => html!(
                             <div class="label-input-combo second-level standard-padding-margin-corners">
                                 <p>{"System prompt part : "}</p>
@@ -1423,14 +1640,14 @@ pub fn app_page() -> Html {
                         ),
                         ChatSetting::MaxContextLength(length) => html!(
                             <div class="label-input-combo second-level standard-padding-margin-corners">
-                                <p>{"Max context length (in tokens) : "}</p>
-                                <input class="standard-padding-margin-corners" type="range" id="context_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
+                                <p>{format!("Max context length (in tokens) : {}", length)}</p>
+                                <input class="standard-padding-margin-corners" onclick={on_click_callback} onchange={on_change_callback} type="range" id="context_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
                             </div>
                         ),
                         ChatSetting::ResponseTokenLimit(limit) => html!(
                             <div class="label-input-combo second-level standard-padding-margin-corners">
-                                <p>{"Max response length (in tokens) : "}</p>
-                                <input class="standard-padding-margin-corners" type="range" id="response_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
+                                <p>{format!("Max response length (in tokens) : {}", limit)}</p>
+                                <input class="standard-padding-margin-corners" onclick={on_click_callback} onchange={on_change_callback} type="range" id="response_slider" min="512" max="32000" step="256" ref={cc_setting_value_ref} />
                             </div>
                         ),
                         ChatSetting::AccessMode(access_mode) => {
@@ -1443,7 +1660,7 @@ pub fn app_page() -> Html {
                             html!(
                                 <div class="label-input-combo second-level standard-padding-margin-corners">
                                     <p>{"System prompt part : "}</p>
-                                    <select class="standard-padding-margin-corners" id="access_select" ref={cc_setting_value_ref}>
+                                    <select class="standard-padding-margin-corners" onclick={on_click_callback} onchange={on_change_callback} id="access_select" ref={cc_setting_value_ref}>
                                         {access_modes_htmls}
                                     </select>
                                 </div>
@@ -1594,6 +1811,7 @@ pub fn app_page() -> Html {
             <div class="interactive-part">
                 {current_app}
             </div>
+            <div ref={event_div_node_ref}></div>
         </main>
     }
 }

@@ -1,4 +1,5 @@
 #![feature(mpmc_channel)]
+#![feature(string_from_utf8_lossy_owned)]
 
 use std::{
     path::PathBuf,
@@ -10,10 +11,11 @@ use std::{
 };
 
 use openai::Credentials;
-use proxima_backend::{ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, database::{DatabaseReplyVariant, DatabaseRequestVariant}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
+use proxima_backend::{ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, database::{chats::ChatID, context::{ContextPart, ContextPosition}, DatabaseReplyVariant, DatabaseRequestVariant}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
 use reqwest::Response;
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use futures_util::StreamExt;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -63,25 +65,76 @@ async fn database_post_request(state: tauri::State<'_,ProximaState>, request:DBP
 pub struct HttpAIPostRequest {
     request:AIPayload,
     url:String,
+    chat_id:ChatID
+}
+#[derive(Serialize, Deserialize)]
+pub struct SecondArgument {
+    url:String,
+    chat_id:ChatID
 }
 
 #[tauri::command(async)]
-async fn ai_endpoint_post_request(state: tauri::State<'_,ProximaState>, request:AIPayload, url:String) -> Result<AIResponse, ()> {
-    let response = reqwest::Client::new()
-        .post(url)
-        .json(&request)
-        .send()
-        .await;
+async fn ai_endpoint_post_request(state: tauri::State<'_,ProximaState>, app_state:tauri::AppHandle, request:AIPayload, second:SecondArgument) -> Result<AIResponse, ()> {
+    match request.request.clone() {
+        EndpointRequestVariant::RespondToFullPrompt { whole_context, streaming, session_type, chat_settings } => if streaming {
+            let response = reqwest::Client::new()
+                .post(second.url)
+                .json(&request)
+                .send()
+                .await;
 
-    match response {
-        Ok(data) => {
-            match data.json().await {
-                Ok(data) => {Ok(data)},
+            match response {
+                Ok(data) => {
+                    let mut stream = data.bytes_stream();
+                    let mut total = ContextPart::new(vec![], ContextPosition::AI);
+                    while let Some(item) = stream.next().await {
+                        match item {
+                            Ok(bytes) => {
+                                let u8s:Vec<u8> = bytes.to_vec();
+                                let string = String::from_utf8_lossy_owned(u8s);
+                                if let Ok(request_variant) = serde_json::from_str::<EndpointResponseVariant>(&string) {
+                                    app_state.emit("chat-token", (request_variant.clone(), second.chat_id));
+                                    match request_variant {
+                                        EndpointResponseVariant::StartStream(data, _) | EndpointResponseVariant::ContinueStream(data, _) => {
+                                            total.add_data(data);
+                                        },
+                                        _ => ()
+                                    }
+                                }
+                                
+                            },
+                            Err(error) => {
+
+                            },
+                        }
+                    }
+                    total.concatenate_text();
+                    dbg!(total.get_data()[0].get_text());
+                    Ok(AIResponse { reply: EndpointResponseVariant::Block(total) })
+                },
+                Err(error) => Err(())
+            }
+        }
+        else {
+            let response = reqwest::Client::new()
+                .post(second.url)
+                .json(&request)
+                .send()
+                .await;
+
+            match response {
+                Ok(data) => {
+                    match data.json().await {
+                        Ok(data) => {Ok(data)},
+                        Err(error) => Err(())
+                    }
+                },
                 Err(error) => Err(())
             }
         },
-        Err(error) => Err(())
+        EndpointRequestVariant::Continue => Err(()),
     }
+    
 }
 
 #[derive(Serialize, Deserialize)]
