@@ -15,7 +15,7 @@ use markdown::to_html;
 use web_sys::{EventTarget, HtmlElement};
 use futures::StreamExt;
 
-use crate::db_sync::{handle_add, UserCursors};
+use crate::db_sync::{UserCursors, apply_server_updates, get_delta_for_add, get_next_id_for_category, handle_add, handle_add_reducible};
 
 #[wasm_bindgen]
 extern "C" {
@@ -219,32 +219,76 @@ pub fn loading_page() -> Html {
     }
 }
 
-pub struct DatabaseState {
+#[derive(PartialEq)]
+struct DatabaseState {
     db:ProxDatabase,
+    cursors:UserCursors
 }
 
-enum DatabaseEvent {
-
+impl Default for DatabaseState {
+    fn default() -> Self {
+        Self {
+            db:ProxDatabase::new_just_data(String::from("a"), String::from("a")),
+            cursors:UserCursors::zero()
+        }
+    }
 }
+
+enum DatabaseAction {
+    SetDB(ProxDatabase),
+    ApplyUpdates(Vec<(DatabaseItemID, DatabaseItem)>),
+    AddItem(Vec<(DatabaseItemID, DatabaseItem)>, DatabaseItemID, DatabaseItem)
+}
+
+impl Reducible for DatabaseState {
+    type Action = DatabaseAction;
+    fn reduce(self: std::rc::Rc<Self>, action: Self::Action) -> std::rc::Rc<Self> {
+        let mut database = self.db.clone();
+        let mut cursors = self.cursors.clone();
+        match action {
+            DatabaseAction::SetDB(db) => database = db,
+            DatabaseAction::ApplyUpdates(updates) => {cursors = apply_server_updates(&mut database, updates, cursors);},
+            DatabaseAction::AddItem(delta, remote_id, item) => {
+                let local_id = get_next_id_for_category(&database, &item);
+                // idea : make the add action have 2 parts :
+                // make the add request in an async scope, and get everything from the local id to the given id in an array
+                // send the array of items between local and remote id as well as the new item as an action
+                // rewrite handle_add_reducible to handle that gracefully
+                let new_cursors = handle_add_reducible(
+                    &mut database,
+                    local_id,
+                    remote_id,
+                    item,
+                    cursors.clone(),
+                    delta
+                );
+                cursors = new_cursors;
+            }
+        }
+        DatabaseState{db:database, cursors}.into()
+    }
+}
+
+
 
 #[function_component(MainPage)]
 pub fn app_page() -> Html {
     let chosen_tab = use_state_eq(|| 0_usize);
     let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
-    let db_state = use_reducer_eq(ProximaState::default);
-    let client_database = use_state_eq(|| {ProxDatabase::new_just_data(proxima_state.username.clone(), String::from("Don't care, local"))});
+    let prox_state = use_reducer_eq(ProximaState::default);
+    let db_state = use_reducer_eq(DatabaseState::default);
     let got_start = use_state_eq(|| false);
     let user_cursors = use_state_eq(|| UserCursors::zero());
     {
         let proxima_state = proxima_state.clone();
-        let client_database = client_database.clone();
+        let db_state = db_state.clone();
         let got_start = got_start.clone();
         use_effect(move || {
             if !*got_start.clone() {
                 let db_clone = proxima_state.start_db.clone();
                 let db_clone_is_ok = db_clone.is_some();
                 if db_clone_is_ok {
-                    client_database.set(proxima_state.start_db.clone().unwrap());
+                    db_state.dispatch(DatabaseAction::SetDB(proxima_state.start_db.clone().unwrap()));
                     got_start.set(true);
                 }
                 
@@ -255,7 +299,7 @@ pub fn app_page() -> Html {
 
     let event_div_node_ref = use_node_ref();
 
-    let second_db = client_database.clone();
+    let second_db = db_state.clone();
 
     use_effect_with(
         event_div_node_ref.clone(),
@@ -266,7 +310,7 @@ pub fn app_page() -> Html {
             move |_| {
                 let mut custard_listener = None;
 
-                let second_db = second_db.clone();
+                let db_state = second_db.clone();
                 let proxima_state = proxima_state.clone();
                 if let Some(element) = div_node_ref.cast::<HtmlElement>() {
                     // Create your Callback as you normally would
@@ -280,9 +324,8 @@ pub fn app_page() -> Html {
                             let event = raw_event.payload.0;
                             let chat_id = raw_event.payload.1;
                             let proxima_state = proxima_state.clone();
-                            let mut db = (*second_db).clone();
 
-                            let mut chat = db.chats.get_chats_mut().get_mut(&chat_id).unwrap();
+                            let mut chat = db_state.db.chats.get_chats().get(&chat_id).unwrap().clone();
 
                             match event {
                                 EndpointResponseVariant::StartStream(data, position) => {
@@ -308,7 +351,8 @@ pub fn app_page() -> Html {
                                 _ => panic!("Impossible to get that here")
                             }
                             let chat_clone = chat.clone();
-                            second_db.set(db);
+                            let id = DatabaseItemID::Chat(chat_clone.id);
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(id, DatabaseItem::Chat(chat))]));
                             let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("GOT THERE IN EVENT YAHOOO")}).unwrap();
                             invoke("print_to_console", args).await;
                             let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat_clone)) };
@@ -385,7 +429,7 @@ pub fn app_page() -> Html {
     let cc_name_ref = use_node_ref();
     let cc_setting_ref = use_node_ref();
     let cc_setting_value_ref = use_node_ref();
-    let second_db_here = client_database.clone();
+    let second_db_here = db_state.clone();
     let current_app = match *(chosen_tab.clone()) {
         /*Home*/ 0 => {
             let onchange = {
@@ -402,37 +446,28 @@ pub fn app_page() -> Html {
                 let chosen_tab = chosen_tab.clone();
                 let chosen_chat = chosen_chat.clone();
                 let user_cursors = user_cursors.clone();
+                let db_state = db_state.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
                     chosen_tab.set(1);
                     let prompt_text = prompt.cast::<web_sys::HtmlInputElement>()
                     .unwrap()
                     .value();
                     let starting_context = WholeContext::new(vec![ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User)]);
-                    let mut database_copy = (*client_database).clone();
-                    let mut local_id = database_copy.chats.create_chat(starting_context.clone(), None, proxima_state.device_id, None);
-                    let start_chat = database_copy.chats.get_chats().get(&local_id).unwrap().clone();
-                    client_database.set(database_copy.clone());
+                    let mut start_chat = db_state.db.chats.create_possible_chat(starting_context.clone(), None, proxima_state.device_id, None);
+                    let mut local_id = start_chat.id;
                     let proxima_state = proxima_state.clone();
-                    let client_database= client_database.clone();
+                    let db_state = db_state.clone();
                     chosen_tab.set(1);
                     chosen_chat.set(Some(local_id));
                     let user_cursors = user_cursors.clone();
+                    let db_state = db_state.clone();
                     spawn_local(async move {
+                        let (delta, new_id, new_item) = get_delta_for_add(
+                            DatabaseItemID::Chat(local_id),
+                            DatabaseItem::Chat(start_chat.clone()),
+                            async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
+                        ).await;
 
-
-                        let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Add(DatabaseItem::Chat(start_chat.clone())) };
-                        let (new_cursors, new_id) = match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                            Ok(response) => handle_add(
-                                &mut database_copy,
-                                DatabaseItemID::Chat(local_id),
-                                DatabaseItem::Chat(start_chat.clone()),
-                                response.reply,
-                                (*user_cursors).clone(),
-                                async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
-                            ).await,
-                            Err(()) => ((*user_cursors).clone(), DatabaseItemID::Chat(local_id))
-                        };
-                        user_cursors.set(new_cursors);
                         if new_id != DatabaseItemID::Chat(local_id) {
                             local_id = match new_id {
                                 DatabaseItemID::Chat(id) => id,
@@ -440,24 +475,22 @@ pub fn app_page() -> Html {
                             };
                         }
 
+                        db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
+
                         let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: false, session_type: SessionType::Chat, chat_settings:None });
                         
-
                         let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
 
                         match value {
                             Ok(response) => {
                                 match response.reply {
                                     EndpointResponseVariant::Block(context_part) => {
-                                        let mut db = database_copy;
-                                        let chat = db.chats.get_chats_mut().get_mut(&local_id).unwrap();
-                                        chat.add_to_context(context_part);
-                                        let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
+                                        start_chat.add_to_context(context_part);
+                                        let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(start_chat.clone())) };
                                         match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                            Ok(response) => (),
+                                            Ok(response) => db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(local_id), DatabaseItem::Chat(start_chat))])),
                                             Err(()) => ()
                                         }
-                                        client_database.set(db);
                                     },
                                     _ => ()
                                 }
@@ -514,7 +547,7 @@ pub fn app_page() -> Html {
             let prompt_send_callback = {
                 let prompt = prompt_node_ref.clone();
                 let proxima_state = proxima_state.clone();
-                let client_database = client_database.clone();
+                let db_state = db_state.clone();
                 let chosen_chat = chosen_chat.clone();
                 let chosen_tab = chosen_tab.clone();
                 let cc_in_use = cc_in_use.clone();
@@ -526,14 +559,13 @@ pub fn app_page() -> Html {
                     .value();
                     prompt.cast::<web_sys::HtmlInputElement>()
                     .unwrap().set_value("");
-                    let mut database_copy = (*client_database).clone();
                     let (mut local_id, starting_context, created, start_chat, config_opt) = match *(chosen_chat.clone()) {
                         Some(chatid) => {
-                            let mut chat = database_copy.chats.get_chats_mut().get_mut(&chatid).unwrap();
+                            let mut chat = db_state.db.chats.get_chats().get(&chatid).unwrap().clone();
                             let (context_part, config_opt) = match *cc_in_use {
                                 Some(config) => {
                                     chat.config = Some(config);
-                                    let config_clone = database_copy.configs.get_configs()[config].clone();
+                                    let config_clone = db_state.db.configs.get_configs()[config].clone();
                                     chat.latest_used_config = Some(config_clone.clone());
                                     match &config_clone.tools {
                                         Some(tools) => {
@@ -554,7 +586,7 @@ pub fn app_page() -> Html {
                         None => {
                             let (starting_context, config_opt) = match *cc_in_use {
                                 Some(config) => {
-                                    let config_clone = database_copy.configs.get_configs()[config].clone();
+                                    let config_clone = db_state.db.configs.get_configs()[config].clone();
                                     match config_clone.tools.clone() {
                                         Some(tools) => {
                                             (WholeContext::new_with_all_settings(vec![ContextPart::new_user_prompt_with_tools(vec![ContextData::Text(prompt_text)])], &config_clone), Some(config_clone))
@@ -566,41 +598,36 @@ pub fn app_page() -> Html {
                                     (WholeContext::new(vec![ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User)]), None)
                                 }
                             };
-                            let new_chatid = database_copy.chats.create_chat(starting_context.clone(), None, proxima_state.device_id, config_opt.clone());
-
-                            let mut chats = database_copy.chats.get_chats_mut().get_mut(&new_chatid).unwrap();
-                            chats.access_modes.insert(*chosen_access_mode);
+                            let mut new_chat = db_state.db.chats.create_possible_chat(starting_context.clone(), None, proxima_state.device_id, config_opt.clone());
+                            let new_chatid = new_chat.id;
+                            new_chat.access_modes.insert(*chosen_access_mode);
                             chosen_chat.set(Some(new_chatid));
-                            (new_chatid, starting_context, true, database_copy.chats.get_chats_mut().get_mut(&new_chatid).unwrap().clone(), config_opt)
+                            (new_chatid, starting_context, true, new_chat, config_opt)
                         }
                     };
                     chosen_tab.set(1);
-                    client_database.set(database_copy.clone());
                     let proxima_state = proxima_state.clone();
-                    let client_database= client_database.clone();
+                    let db_state = db_state.clone();
                     let user_cursors = user_cursors.clone();
                     spawn_local(async move {
                         if created {
-                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Add(DatabaseItem::Chat(start_chat.clone())) };
-                            let (new_cursors, new_id) = match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                Ok(response) => handle_add(
-                                    &mut database_copy,
-                                    DatabaseItemID::Chat(local_id),
-                                    DatabaseItem::Chat(start_chat.clone()),
-                                    response.reply,
-                                    (*user_cursors).clone(),
-                                    async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
-                                ).await,
-                                Err(()) => ((*user_cursors).clone(), DatabaseItemID::Chat(local_id))
-                            };
-                            user_cursors.set(new_cursors);
+                            let (delta, new_id, new_item) = get_delta_for_add(
+                                DatabaseItemID::Chat(local_id),
+                                DatabaseItem::Chat(start_chat.clone()),
+                                async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
+                            ).await;
+
                             if new_id != DatabaseItemID::Chat(local_id) {
                                 local_id = match new_id {
                                     DatabaseItemID::Chat(id) => id,
                                     _ => panic!("Wrong kind of ID after check, impossible")
                                 };
                             }
-                            client_database.set(database_copy.clone());
+
+                            db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
+                        }
+                        else {
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(local_id), DatabaseItem::Chat(start_chat.clone()))]));
                         }
 
                         let streaming = false;
@@ -614,26 +641,24 @@ pub fn app_page() -> Html {
                                 Ok(response) => {
                                     match response.reply {
                                         EndpointResponseVariant::Block(context_part) => {
-                                            let mut db = database_copy;
-                                            let chat = db.chats.get_chats_mut().get_mut(&local_id).unwrap();
+                                            let mut chat = start_chat.clone();
                                             chat.add_to_context(context_part);
                                             let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
                                             match make_db_request(json_request, proxima_state.chat_url.clone()).await {
                                                 Ok(response) => (),
                                                 Err(()) => ()
                                             }
-                                            client_database.set(db);
+                                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(chat.id), DatabaseItem::Chat(chat))]));
                                         },
                                         EndpointResponseVariant::MultiTurnBlock(whole_context) => {
-                                            let mut db = database_copy;
-                                            let chat = db.chats.get_chats_mut().get_mut(&local_id).unwrap();
+                                            let mut chat = start_chat.clone();
                                             chat.context = whole_context;
                                             let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
                                             match make_db_request(json_request, proxima_state.chat_url.clone()).await {
                                                 Ok(response) => (),
                                                 Err(()) => ()
                                             }
-                                            client_database.set(db);
+                                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(chat.id), DatabaseItem::Chat(chat))]));
                                         }
                                         _ => ()
                                     }
@@ -655,7 +680,7 @@ pub fn app_page() -> Html {
                 })
             };
             let chosen_access_mode = chosen_access_mode.clone();
-            let chat_htmls = client_database.chats.get_chats().iter().map(|(id, chat)| {
+            let chat_htmls = db_state.db.chats.get_chats().iter().map(|(id, chat)| {
                 let chosen_access_mode = chosen_access_mode.clone();
                 let callback = {
                     let chosen_chat_clone = chosen_chat.clone();
@@ -680,8 +705,8 @@ pub fn app_page() -> Html {
                     )
                 }
             }).collect::<Html>();
-            let chosen_chat_by_id = client_database.chats.get_chats().get(&(chosen_chat.unwrap_or(1000000)));
-            let config_htmls:Vec<Html> = second_db_here.configs.get_configs().iter().enumerate().map(|(id, config)| {
+            let chosen_chat_by_id = db_state.db.chats.get_chats().get(&(chosen_chat.unwrap_or(1000000)));
+            let config_htmls:Vec<Html> = second_db_here.db.configs.get_configs().iter().enumerate().map(|(id, config)| {
                 html!(
                     <option value={config.name.clone()}>{config.name.clone()}</option>
                 )
@@ -690,17 +715,15 @@ pub fn app_page() -> Html {
             let cc_select_callback = {
                 let cc_in_use = cc_in_use.clone();
                 let select_node = cc_select_ref.clone();
-                let db_clone = second_db_here.clone();
+                let db_state = second_db_here.clone();
                 Callback::from(move |mouse_evt:Event| {
-                    let mut db_copy = (*db_clone).clone();
                     let cc_name = select_node.cast::<web_sys::HtmlInputElement>()
                     .unwrap()
                     .value();
-                    match db_copy.configs.get_configs().iter().enumerate().find(|(i,config)| {
+                    match db_state.db.configs.get_configs().iter().enumerate().find(|(i,config)| {
                         &config.name == &cc_name
                     }) {
                         Some((id, config)) => {
-                            let second_db_clone = db_clone.clone();
                             let config_data = format!("{:?} {:?}", config.name.clone(), config.tools.is_some());
                             cc_in_use.set(Some(id));
                             spawn_local(async move {
@@ -723,7 +746,7 @@ pub fn app_page() -> Html {
                         <hr/>
                         <div class="list-holder">
                             {
-                                if client_database.chats.get_chats().len() > 0 {
+                                if db_state.db.chats.get_chats().len() > 0 {
                                     chat_htmls
                                 }
                                 else {
@@ -794,10 +817,10 @@ pub fn app_page() -> Html {
         }
         /* Tags */ 2 => {
 
-            let tag_htmls = client_database.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+            let tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
                 let callback = {
 
-                    let second_db = client_database.clone();
+                    let second_db = db_state.db.clone();
                     let chosen_tag_clone = chosen_tag.clone();
                     let chosen_parent_tag_clone = chosen_parent_tag.clone();
                     let id_clone = id;
@@ -806,7 +829,7 @@ pub fn app_page() -> Html {
                         chosen_parent_tag_clone.set(second_db.tags.get_tags()[id_clone].get_parent())
                     })
                 };
-                if !client_database.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id) {
+                if !db_state.db.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id) {
                     html!()
                 }
                 else if chosen_tag.is_some() && id == chosen_tag.unwrap() {
@@ -822,7 +845,7 @@ pub fn app_page() -> Html {
                 }
             }).collect::<Html>();
 
-            let parent_tag_htmls = client_database.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+            let parent_tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
                 let callback = {
                     let chosen_tag_clone = chosen_parent_tag.clone();
                     let id_clone = id;
@@ -830,7 +853,7 @@ pub fn app_page() -> Html {
                         chosen_tag_clone.set(Some(id_clone));
                     })
                 };
-                if (chosen_tag.is_some() && id == chosen_tag.unwrap()) || !client_database.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id)  {
+                if (chosen_tag.is_some() && id == chosen_tag.unwrap()) || !db_state.db.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id)  {
                     html!()
                 }
                 else if chosen_parent_tag.is_some() && id == chosen_parent_tag.unwrap() {
@@ -855,19 +878,19 @@ pub fn app_page() -> Html {
                 })
             };
 
-            let chosen_tag_by_id = client_database.tags.get_tags().get((chosen_tag.unwrap_or(1000000)));
+            let chosen_tag_by_id = db_state.db.tags.get_tags().get((chosen_tag.unwrap_or(1000000)));
 
             let tag_update_callback = {
                 let chosen_tag = chosen_tag.clone();
                 let chosen_parent_tag = chosen_parent_tag.clone();
-                let client_db = client_database.clone();
+                let db_state = db_state.clone();
                 let tag_name_ref = tag_name_ref.clone();
                 let tag_desc_ref = tag_desc_ref.clone();
                 let chosen_access_mode = chosen_access_mode.clone();
                 let proxima_state = proxima_state.clone();
                 let user_cursors = user_cursors.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
-                    let mut db_copy = (*client_db).clone();
+                    let db_state = db_state.clone();
                     
                     let tag_name = tag_name_ref.cast::<web_sys::HtmlInputElement>()
                     .unwrap()
@@ -881,11 +904,11 @@ pub fn app_page() -> Html {
                     
                     match *chosen_tag {
                         Some(tag_id) => {
-                            let mut tag = db_copy.tags.get_tags()[tag_id].clone();
+                            let mut tag = db_state.db.tags.get_tags()[tag_id].clone();
                             tag.name = tag_name;
                             tag.desc = description;
                             tag.parent = *chosen_parent_tag;
-                            db_copy.tags.update_tag(tag.clone());
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Tag(tag_id), DatabaseItem::Tag(tag.clone()))]));
                             let proxima_state = proxima_state.clone();
                             spawn_local(async move {
                                 let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Tag(tag)) };
@@ -894,42 +917,31 @@ pub fn app_page() -> Html {
                                     Err(()) => ()
                                 }
                             });
-                            client_db.set(db_copy);
                             
                         },
                         None => {
-                            let tag_id = db_copy.tags.add_tag(NewTag::new(tag_name, description, *chosen_parent_tag));
-
+                            let tag = db_state.db.tags.create_possible_tag(NewTag::new(tag_name, description, *chosen_parent_tag));
+                            let mut tag_id = tag.get_id();
 
                             let am_id = *chosen_access_mode;
-                            db_copy.access_modes.associate_tag_to_mode(am_id, tag_id);
-                            let new_access_mode = db_copy.access_modes.get_modes()[am_id].clone();
-
-                            let tag = db_copy.tags.get_tags()[tag_id].clone();
-
+                            let (new_am_0, new_am_n) = db_state.db.access_modes.get_updated_modes_from_association(am_id, tag_id);
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![
+                                (DatabaseItemID::AccessMode(0), DatabaseItem::AccessMode(new_am_0.clone())),
+                                (DatabaseItemID::AccessMode(new_am_n.get_id()), DatabaseItem::AccessMode(new_am_n.clone())),
+                            ]));
                             let proxima_state = proxima_state.clone();
                             let user_cursors = user_cursors.clone();
-                            let client_db = client_db.clone();
                             spawn_local(async move {
-                                let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Add(DatabaseItem::Tag(tag.clone())) };
-                                let (new_cursors, new_id) = match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                    Ok(response) => handle_add(
-                                        &mut db_copy,
-                                        DatabaseItemID::Tag(tag_id),
-                                        DatabaseItem::Tag(tag),
-                                        response.reply,
-                                        (*user_cursors).clone(),
-                                        async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
-                                    ).await,
-                                    Err(()) => ((*user_cursors).clone(), DatabaseItemID::Tag(tag_id))
-                                };
-                                let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::AccessMode(new_access_mode)) };
-                                match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                    Ok(response) => (),
-                                    Err(()) => ()
-                                }
-                                user_cursors.set(new_cursors);
-                                client_db.set(db_copy);
+                                let (delta, new_id, new_item) = get_delta_for_add(
+                                    DatabaseItemID::Tag(tag_id),
+                                    DatabaseItem::Tag(tag.clone()),
+                                    async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
+                                ).await;
+                                make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request:DatabaseRequestVariant::Update(DatabaseItem::AccessMode(new_am_0)) }, proxima_state.chat_url.clone()).await;
+                                make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request:DatabaseRequestVariant::Update(DatabaseItem::AccessMode(new_am_n)) }, proxima_state.chat_url.clone()).await;
+                                
+
+                                db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
                             });
                         },
                     }
@@ -947,7 +959,7 @@ pub fn app_page() -> Html {
 
                         <div class="list-holder">
                             {
-                                if client_database.tags.get_tags().len() > 0 {
+                                if db_state.db.tags.get_tags().len() > 0 {
                                     tag_htmls
                                 }
                                 else {
@@ -979,14 +991,14 @@ pub fn app_page() -> Html {
                                 <h2>
                                     {
                                         match *chosen_parent_tag {
-                                            Some(tag_id) => format!("Currently chosen parent tag : {}", client_database.tags.get_tags()[tag_id].get_name().clone()),
+                                            Some(tag_id) => format!("Currently chosen parent tag : {}", db_state.db.tags.get_tags()[tag_id].get_name().clone()),
                                             None => "Does this tag have a parent ?".to_string()
                                         }
                                     }
                                 </h2>
                                 <div class="list-holder">
                                     {
-                                        if client_database.tags.get_tags().len() > 0 {
+                                        if db_state.db.tags.get_tags().len() > 0 {
                                             parent_tag_htmls
                                         }
                                         else {
@@ -1016,10 +1028,10 @@ pub fn app_page() -> Html {
         },
         /* Access Modes */ 3 => {
             let chosen_am = chosen_am_for_creation.clone();
-            let access_mode_htmls = client_database.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
+            let access_mode_htmls = db_state.db.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
                 let callback = {
 
-                    let second_db = client_database.clone();
+                    let second_db = db_state.db.clone();
                     let chosen_am_clone = chosen_am.clone();
                     let chosen_tags = chosen_tags_for_am.clone();
                     let id_clone = id;
@@ -1041,11 +1053,11 @@ pub fn app_page() -> Html {
                 }
             }).collect::<Html>();
 
-            let tag_htmls = client_database.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+            let tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
                 let chosen_access_mode = chosen_access_mode.clone();
                 let callback = {
 
-                    let second_db = client_database.clone();
+                    let second_db = db_state.db.clone();
                     let chosen_tags = chosen_tags_for_am.clone();
                     let id_clone = id;
                     Callback::from(move |mouse_evt:MouseEvent| {
@@ -1054,7 +1066,7 @@ pub fn app_page() -> Html {
                         chosen_tags.set(list_clone);
                     })
                 };
-                if chosen_tags_for_am.contains(&id) || !client_database.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id) {
+                if chosen_tags_for_am.contains(&id) || !db_state.db.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id) {
                     html!()
                 }
                 else {
@@ -1064,10 +1076,10 @@ pub fn app_page() -> Html {
                 }
             }).collect::<Html>();
 
-            let chosen_tag_htmls = client_database.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+            let chosen_tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
                 let chosen_access_mode = chosen_access_mode.clone();
                 let callback = {
-                    let second_db = client_database.clone();
+                    let second_db = db_state.db.clone();
                     let chosen_tags = chosen_tags_for_am.clone();
                     let id_clone = id;
                     Callback::from(move |mouse_evt:MouseEvent| {
@@ -1076,7 +1088,7 @@ pub fn app_page() -> Html {
                         chosen_tags.set(list_clone);
                     })
                 };
-                if !chosen_tags_for_am.contains(&id) || !client_database.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id) {
+                if !chosen_tags_for_am.contains(&id) || !db_state.db.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id) {
                     html!()
                 }
                 else {
@@ -1095,16 +1107,16 @@ pub fn app_page() -> Html {
                 })
             };
 
-            let chosen_am_by_id = client_database.access_modes.get_modes().get((chosen_am_for_creation.unwrap_or(1000000)));
+            let chosen_am_by_id = db_state.db.access_modes.get_modes().get((chosen_am_for_creation.unwrap_or(1000000)));
 
             let am_update_callback = {
                 let chosen_am = chosen_am_for_creation.clone();
                 let chosen_tags = chosen_tags_for_am.clone();
-                let client_db = client_database.clone();
+                let db_state = db_state.clone();
                 let proxima_state = proxima_state.clone();
                 let am_name_ref = am_name_ref.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
-                    let mut db_copy = (*client_db).clone();
+                    let mut db_state = db_state.clone();
                     
                     let am_name = am_name_ref.cast::<web_sys::HtmlInputElement>()
                     .unwrap()
@@ -1112,10 +1124,10 @@ pub fn app_page() -> Html {
 
                     match *chosen_am {
                         Some(am_id) => {
-                            let mut am = db_copy.access_modes.get_modes()[am_id].clone();
+                            let mut am = db_state.db.access_modes.get_modes()[am_id].clone();
                             am.name = am_name;
                             am.tags = (*chosen_tags).clone();
-                            db_copy.access_modes.update_mode(am.clone());
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::AccessMode(am_id), DatabaseItem::AccessMode(am.clone()))]));
                             let proxima_state = proxima_state.clone();
                             spawn_local(async move {
                                 let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::AccessMode(am)) };
@@ -1124,29 +1136,20 @@ pub fn app_page() -> Html {
                                     Err(()) => ()
                                 }
                             });
-                            client_db.set(db_copy);
                         },
                         None => {
                             let am = AccessMode::new(0, (*chosen_tags).clone(), am_name);
-                            let id = db_copy.access_modes.add_mode(am.clone());
+                            let id = get_next_id_for_category(&db_state.db, &DatabaseItem::AccessMode(am.clone()));
                             let proxima_state = proxima_state.clone();
                             let user_cursors = user_cursors.clone();
-                            let client_db = client_db.clone();
                             spawn_local(async move {
-                                let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Add(DatabaseItem::AccessMode(am.clone())) };
-                                let (new_cursors, new_id) = match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                    Ok(response) => handle_add(
-                                        &mut db_copy,
-                                        DatabaseItemID::AccessMode(id),
-                                        DatabaseItem::AccessMode(am),
-                                        response.reply,
-                                        (*user_cursors).clone(),
-                                        async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
-                                    ).await,
-                                    Err(()) => ((*user_cursors).clone(), DatabaseItemID::AccessMode(id))
-                                };
-                                user_cursors.set(new_cursors);
-                                client_db.set(db_copy);
+                                let (delta, new_id, new_item) = get_delta_for_add(
+                                    id,
+                                    DatabaseItem::AccessMode(am.clone()),
+                                    async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
+                                ).await;
+
+                                db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
                             });
                         },
                     }
@@ -1163,7 +1166,7 @@ pub fn app_page() -> Html {
 
                         <div class="list-holder">
                             {
-                                if client_database.access_modes.get_modes().len() > 0 {
+                                if db_state.db.access_modes.get_modes().len() > 0 {
                                     access_mode_htmls
                                 }
                                 else {
@@ -1204,7 +1207,7 @@ pub fn app_page() -> Html {
                                         <td>
                                         <div class="list-holder">
                                             {
-                                                if client_database.tags.get_tags().len() > 0 {
+                                                if db_state.db.tags.get_tags().len() > 0 {
                                                     tag_htmls
                                                 }
                                                 else {
@@ -1216,7 +1219,7 @@ pub fn app_page() -> Html {
                                         <td>
                                         <div class="list-holder">
                                             {
-                                                if client_database.tags.get_tags().len() > 0 {
+                                                if db_state.db.tags.get_tags().len() > 0 {
                                                     chosen_tag_htmls
                                                 }
                                                 else {
@@ -1253,13 +1256,13 @@ pub fn app_page() -> Html {
             let new_cc_callback = {
                 let user_cursors = user_cursors.clone();
                 let name_ref = cc_name_ref.clone();
-                let client_db = client_database.clone();
+                let db_state = db_state.clone();
                 let proxima_state = proxima_state.clone();
                 let chosen_access_mode = chosen_access_mode.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
                     let mut cursors_clone = (*user_cursors).clone();
                     
-                    let mut db_copy = (*client_db).clone();
+                    let mut db_state = db_state.clone();
                     let proxima_state = proxima_state.clone();
                     let name = name_ref.cast::<web_sys::HtmlInputElement>()
                     .unwrap()
@@ -1267,37 +1270,29 @@ pub fn app_page() -> Html {
                     if !name.trim().is_empty() {
                         let mut config = ChatConfiguration::new(name, vec![]);
                         config.access_modes.insert((*chosen_access_mode).clone());
-                        let id = db_copy.configs.add_config(config.clone());
+                        let id = get_next_id_for_category(&db_state.db, &DatabaseItem::ChatConfig(config.clone()));
                         let proxima_state = proxima_state.clone();
                         let user_cursors = user_cursors.clone();
-                        let client_db = client_db.clone();
                         spawn_local(async move {
-                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Add(DatabaseItem::ChatConfig(config.clone())) };
-                            let (new_cursors, new_id) = match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                Ok(response) => handle_add(
-                                    &mut db_copy,
-                                    DatabaseItemID::ChatConfiguration(id),
-                                    DatabaseItem::ChatConfig(config),
-                                    response.reply,
-                                    (*user_cursors).clone(),
-                                    async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
-                                ).await,
-                                Err(()) => ((*user_cursors).clone(), DatabaseItemID::ChatConfiguration(id))
-                            };
-                            user_cursors.set(new_cursors);
-                            client_db.set(db_copy);
+                            let (delta, new_id, new_item) = get_delta_for_add(
+                                id,
+                                DatabaseItem::ChatConfig(config.clone()),
+                                async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
+                            ).await;
+
+                            db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
                         });
                     }
                     
                 })
             };
-            let ccs_htmls = client_database.configs.get_configs().iter().enumerate().map(|(id, config)| {
+            let ccs_htmls = db_state.db.configs.get_configs().iter().enumerate().map(|(id, config)| {
                 let user_cursors = user_cursors.clone();
                 let chosen_access_mode = chosen_access_mode.clone();
                 let callback = {
 
                     let setting_in_modification = setting_in_modification.clone();
-                    let second_db = client_database.clone();
+                    let second_db = db_state.db.clone();
                     let user_cursors = user_cursors.clone();
                     let chosen_tags = chosen_tags_for_am.clone();
                     let id_clone = id;
@@ -1331,7 +1326,7 @@ pub fn app_page() -> Html {
                 let setting_in_modification = setting_in_modification.clone();
             let chosen_cc_settings_htmls = match current_cursors.config_for_modification {
                 Some(config_id) => {
-                    let client_db = client_database.clone();
+                    let client_db = db_state.db.clone();
                     client_db.configs.get_configs()[config_id].raw_settings.iter().enumerate().map(|(id, setting)| {
 
                         let setting_in_modification = setting_in_modification.clone();
@@ -1339,7 +1334,7 @@ pub fn app_page() -> Html {
                         let setting_c = setting.clone();
                         let callback = {
 
-                            let second_db = client_database.clone();
+                            let second_db = db_state.db.clone();
                             let user_cursors = user_cursors.clone();
                             let chosen_tags = chosen_tags_for_am.clone();
                             let id_clone = id;
@@ -1364,7 +1359,7 @@ pub fn app_page() -> Html {
                         }
                     }).collect::<Html>()
                 },
-                None => if client_database.configs.get_configs().len() > 0 {
+                None => if db_state.db.configs.get_configs().len() > 0 {
                     html!({"Please pick a configuration to modify"})
                 }
                 else {
@@ -1382,7 +1377,6 @@ pub fn app_page() -> Html {
                 let chosen_parent_tag = chosen_parent_tag.clone();
                 let setting_in_modification = setting_in_modification.clone();
                 Callback::from(move |mouse_evt:Event| {
-                    let mut db_copy = (*db_clone).clone();
                     let selected_setting_string = select_node.cast::<web_sys::HtmlInputElement>()
                     .unwrap()
                     .value();
@@ -1404,11 +1398,10 @@ pub fn app_page() -> Html {
 
             let on_click_callback = {
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
-                let client_db = client_database.clone();
+                let db_state = db_state.clone();
                 let setting_in_modification = setting_in_modification.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
                     let cc_setting_value_ref = cc_setting_value_ref.clone();
-                    let db_copy = (*client_db).clone();
                     let new_setting = match (*setting_in_modification).clone() {
                         Some(setting) => match setting {
                             ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
@@ -1432,7 +1425,7 @@ pub fn app_page() -> Html {
                                 let access_mode_name = cc_setting_value_ref.cast::<web_sys::HtmlInputElement>()
                                 .unwrap()
                                 .value();
-                                match db_copy.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+                                match db_state.db.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
                                     access_mode.get_name() == &access_mode_name
                                 }) {
                                     Some((i, access_mode)) => {
@@ -1453,11 +1446,10 @@ pub fn app_page() -> Html {
 
             let on_change_callback = {
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
-                let client_db = client_database.clone();
+                let db_state = db_state.clone();
                 let setting_in_modification = setting_in_modification.clone();
                 Callback::from(move |mouse_evt:Event| {
                     let cc_setting_value_ref = cc_setting_value_ref.clone();
-                    let db_copy = (*client_db).clone();
                     let new_setting = match (*setting_in_modification).clone() {
                         Some(setting) => match setting {
                             ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
@@ -1481,7 +1473,7 @@ pub fn app_page() -> Html {
                                 let access_mode_name = cc_setting_value_ref.cast::<web_sys::HtmlInputElement>()
                                 .unwrap()
                                 .value();
-                                match db_copy.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+                                match db_state.db.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
                                     access_mode.get_name() == &access_mode_name
                                 }) {
                                     Some((i, access_mode)) => {
@@ -1503,14 +1495,14 @@ pub fn app_page() -> Html {
             let add_update_settings_callback = {
                 let user_cursors = user_cursors.clone();
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
-                let client_db = client_database.clone();
+                let client_db = db_state.clone();
                 let proxima_state = proxima_state.clone();
                 let setting_in_modification = setting_in_modification.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
                     let mut cursors_clone = (*user_cursors).clone();
                     let cc_setting_value_ref = cc_setting_value_ref.clone();
-                    let mut db_copy = (*client_db).clone();
                     let proxima_state = proxima_state.clone();
+                    let db_state = client_db.clone();
                     let new_setting = match (*setting_in_modification).clone() {
                         Some(setting) => match setting {
                             ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
@@ -1534,7 +1526,7 @@ pub fn app_page() -> Html {
                                 let access_mode_name = cc_setting_value_ref.cast::<web_sys::HtmlInputElement>()
                                 .unwrap()
                                 .value();
-                                match db_copy.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+                                match db_state.db.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
                                     access_mode.get_name() == &access_mode_name
                                 }) {
                                     Some((i, access_mode)) => {
@@ -1554,9 +1546,8 @@ pub fn app_page() -> Html {
                         Some(config_id) => {
                             let proxima_state = proxima_state.clone();
                             let user_cursors = user_cursors.clone();
-                            let client_db = client_db.clone();
                             spawn_local(async move {
-                                let mut config = db_copy.configs.get_configs()[config_id].clone();
+                                let mut config = db_state.db.configs.get_configs()[config_id].clone();
                                 let mut cursors_clone = (*user_cursors).clone();
 
                                 match cursors_clone.chosen_setting {
@@ -1570,7 +1561,7 @@ pub fn app_page() -> Html {
                                 }
                                 config.tools = Tools::try_from_settings(config.raw_settings.clone());
                                 config.last_updated = Utc::now();
-                                db_copy.configs.update_config(config.clone());
+                                db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::ChatConfiguration(config_id), DatabaseItem::ChatConfig(config.clone()))]));
                                 let proxima_state = proxima_state.clone();
                                 spawn_local(async move {
                                     let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::ChatConfig(config)) };
@@ -1579,7 +1570,6 @@ pub fn app_page() -> Html {
                                         Err(()) => ()
                                     }
                                 });
-                                client_db.set(db_copy);
                                 user_cursors.set(cursors_clone);
                             });
                         },
@@ -1651,7 +1641,7 @@ pub fn app_page() -> Html {
                             </div>
                         ),
                         ChatSetting::AccessMode(access_mode) => {
-                            let access_modes_htmls:Vec<Html> = second_db_here.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
+                            let access_modes_htmls:Vec<Html> = second_db_here.db.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
                                 html!(
                                     <option value={access_mode.get_name().clone()}>{access_mode.get_name().clone()}</option>
                                 )
@@ -1682,7 +1672,7 @@ pub fn app_page() -> Html {
 
                         <div class="list-holder most-horizontal-space-no-flex">
                             {
-                                if client_database.configs.get_configs().len() > 0 {
+                                if db_state.db.configs.get_configs().len() > 0 {
                                     ccs_htmls
                                 }
                                 else {
@@ -1696,7 +1686,7 @@ pub fn app_page() -> Html {
                         <h2>
                         {
                             match user_cursors.config_for_modification {
-                                Some(config) => html!({format!("For : {}", client_database.configs.get_configs()[config].name.clone())}),
+                                Some(config) => html!({format!("For : {}", db_state.db.configs.get_configs()[config].name.clone())}),
                                 None => html!()
                             }
                         }
@@ -1759,11 +1749,10 @@ pub fn app_page() -> Html {
         let chosen_tag = chosen_tag.clone();
         let chosen_parent_tag = chosen_parent_tag.clone();
         Callback::from(move |mouse_evt:Event| {
-            let mut db_copy = (*db_clone).clone();
             let access_mode_name = select_node.cast::<web_sys::HtmlInputElement>()
             .unwrap()
             .value();
-            match db_copy.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+            match db_state.db.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
                 access_mode.get_name() == &access_mode_name
             }) {
                 Some((id, access_mode)) => {
@@ -1788,7 +1777,7 @@ pub fn app_page() -> Html {
             
         })
     };
-    let access_modes_htmls:Vec<Html> = second_db_here.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
+    let access_modes_htmls:Vec<Html> = second_db_here.db.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
         html!(
             <option value={access_mode.get_name().clone()}>{access_mode.get_name().clone()}</option>
         )
