@@ -237,7 +237,20 @@ impl Default for DatabaseState {
 enum DatabaseAction {
     SetDB(ProxDatabase),
     ApplyUpdates(Vec<(DatabaseItemID, DatabaseItem)>),
-    AddItem(Vec<(DatabaseItemID, DatabaseItem)>, DatabaseItemID, DatabaseItem)
+    AddItem(Vec<(DatabaseItemID, DatabaseItem)>, DatabaseItemID, DatabaseItem),
+    SetTab(usize),
+    SetChat(Option<usize>),
+    SetModifiedAM(Option<usize>),
+    SetGlobalAM(usize),
+    SetModifiedTag(Option<usize>),
+    SetParentTag(Option<usize>),
+    ChangeUsedChatConfig(Option<usize>),
+    AddToTagsForAM(TagID),
+    RemoveFromTagsForAM(TagID),
+    SetTagsForAM(HashSet<TagID>),
+    SetConfigSettingID(Option<usize>),
+    SetCurrentSetting(Option<ChatSetting>),
+    SetModifiedConfig(Option<usize>)
 }
 
 impl Reducible for DatabaseState {
@@ -263,7 +276,21 @@ impl Reducible for DatabaseState {
                     delta
                 );
                 cursors = new_cursors;
-            }
+            },
+            DatabaseAction::SetChat(chat) => cursors.chosen_chat = chat,
+            DatabaseAction::SetTab(tab) => cursors.chosen_tab = tab,
+            DatabaseAction::SetGlobalAM(am) => cursors.chosen_access_mode = am,
+            DatabaseAction::SetModifiedAM(am) => cursors.access_mode_for_modification = am,
+            DatabaseAction::SetModifiedTag(tag) => cursors.chosen_tag = tag,
+            DatabaseAction::SetParentTag(par) => cursors.chosen_parent_tag = par,
+            DatabaseAction::ChangeUsedChatConfig(config) => cursors.chosen_config = config,
+            DatabaseAction::AddToTagsForAM(tag) => {cursors.chosen_access_mode_tags.insert(tag);},
+            DatabaseAction::RemoveFromTagsForAM(tag) => {cursors.chosen_access_mode_tags.remove(&tag);},
+            DatabaseAction::SetTagsForAM(tags) => cursors.chosen_access_mode_tags = tags,
+            DatabaseAction::SetConfigSettingID(id) => cursors.chosen_setting = id,
+            DatabaseAction::SetCurrentSetting(setting) => cursors.setting_for_modification = setting,
+            DatabaseAction::SetModifiedConfig(config) => cursors.config_for_modification = config
+
         }
         DatabaseState{db:database, cursors}.into()
     }
@@ -273,12 +300,9 @@ impl Reducible for DatabaseState {
 
 #[function_component(MainPage)]
 pub fn app_page() -> Html {
-    let chosen_tab = use_state_eq(|| 0_usize);
     let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
-    let prox_state = use_reducer_eq(ProximaState::default);
     let db_state = use_reducer_eq(DatabaseState::default);
     let got_start = use_state_eq(|| false);
-    let user_cursors = use_state_eq(|| UserCursors::zero());
     {
         let proxima_state = proxima_state.clone();
         let db_state = db_state.clone();
@@ -391,7 +415,7 @@ pub fn app_page() -> Html {
 
     let mut values = Vec::with_capacity(4);
     for i in 0..8 {
-        if *chosen_tab == i {
+        if db_state.cursors.chosen_tab == i {
             values.push(String::from("chosen"));
         }
         else {
@@ -399,26 +423,16 @@ pub fn app_page() -> Html {
         }
     }
     let tab_picker_callbacks:Vec<Callback<MouseEvent>> = (0..8).into_iter().map(|i| {
-        let chosen_tab = chosen_tab.clone();
+        let db_state = db_state.clone();
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
-            let prev_tab = (*chosen_tab).clone();
-            chosen_tab.set(i);
+            db_state.dispatch(DatabaseAction::SetTab(i));
             
         })
     }).collect();
 
 
     let selected_value = use_state(|| "Option1".to_string());
-    let chosen_chat = use_state(|| None);
-    let chosen_tag:UseStateHandle<Option<usize>>= use_state(|| None);
-    let chosen_parent_tag:UseStateHandle<Option<usize>>= use_state(|| None);
-    let chosen_access_mode = use_state_eq(|| {0_usize});
-    let chosen_tags_for_am = use_state_eq(|| {HashSet::<TagID>::new()});
-    let chosen_am_for_creation:UseStateHandle<Option<usize>> = use_state_eq(|| None);
-    let cc_in_modification:UseStateHandle<Option<usize>> = use_state_eq(|| None);
-    let cc_in_use:UseStateHandle<Option<usize>> = use_state_eq(|| None);
-    let setting_in_modification:UseStateHandle<Option<ChatSetting>> = use_state_eq(|| None);
 
     let pseudo_node_ref = use_node_ref();
     let prompt_node_ref = use_node_ref();
@@ -430,7 +444,7 @@ pub fn app_page() -> Html {
     let cc_setting_ref = use_node_ref();
     let cc_setting_value_ref = use_node_ref();
     let second_db_here = db_state.clone();
-    let current_app = match *(chosen_tab.clone()) {
+    let current_app = match db_state.cursors.chosen_tab {
         /*Home*/ 0 => {
             let onchange = {
                 let selected_value = selected_value.clone();
@@ -443,12 +457,9 @@ pub fn app_page() -> Html {
                 let prompt = prompt_node_ref.clone();
                 let proxima_state = proxima_state.clone();
 
-                let chosen_tab = chosen_tab.clone();
-                let chosen_chat = chosen_chat.clone();
-                let user_cursors = user_cursors.clone();
                 let db_state = db_state.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
-                    chosen_tab.set(1);
+                    db_state.dispatch(DatabaseAction::SetTab(1));
                     let prompt_text = prompt.cast::<web_sys::HtmlInputElement>()
                     .unwrap()
                     .value();
@@ -457,9 +468,8 @@ pub fn app_page() -> Html {
                     let mut local_id = start_chat.id;
                     let proxima_state = proxima_state.clone();
                     let db_state = db_state.clone();
-                    chosen_tab.set(1);
-                    chosen_chat.set(Some(local_id));
-                    let user_cursors = user_cursors.clone();
+                    db_state.dispatch(DatabaseAction::SetTab(1));
+                    db_state.dispatch(DatabaseAction::SetChat(Some(local_id)));
                     let db_state = db_state.clone();
                     spawn_local(async move {
                         let (delta, new_id, new_item) = get_delta_for_add(
@@ -548,21 +558,16 @@ pub fn app_page() -> Html {
                 let prompt = prompt_node_ref.clone();
                 let proxima_state = proxima_state.clone();
                 let db_state = db_state.clone();
-                let chosen_chat = chosen_chat.clone();
-                let chosen_tab = chosen_tab.clone();
-                let cc_in_use = cc_in_use.clone();
-                let chosen_access_mode = chosen_access_mode.clone();
-                let user_cursors = user_cursors.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
                     let prompt_text = prompt.cast::<web_sys::HtmlInputElement>()
                     .unwrap()
                     .value();
                     prompt.cast::<web_sys::HtmlInputElement>()
                     .unwrap().set_value("");
-                    let (mut local_id, starting_context, created, start_chat, config_opt) = match *(chosen_chat.clone()) {
+                    let (mut local_id, starting_context, created, start_chat, config_opt) = match (db_state.cursors.chosen_chat.clone()) {
                         Some(chatid) => {
                             let mut chat = db_state.db.chats.get_chats().get(&chatid).unwrap().clone();
-                            let (context_part, config_opt) = match *cc_in_use {
+                            let (context_part, config_opt) = match db_state.cursors.chosen_config {
                                 Some(config) => {
                                     chat.config = Some(config);
                                     let config_clone = db_state.db.configs.get_configs()[config].clone();
@@ -584,7 +589,7 @@ pub fn app_page() -> Html {
                             (chatid, chat.get_context().clone(), false, chat.clone(), config_opt)
                         },
                         None => {
-                            let (starting_context, config_opt) = match *cc_in_use {
+                            let (starting_context, config_opt) = match db_state.cursors.chosen_config {
                                 Some(config) => {
                                     let config_clone = db_state.db.configs.get_configs()[config].clone();
                                     match config_clone.tools.clone() {
@@ -600,15 +605,14 @@ pub fn app_page() -> Html {
                             };
                             let mut new_chat = db_state.db.chats.create_possible_chat(starting_context.clone(), None, proxima_state.device_id, config_opt.clone());
                             let new_chatid = new_chat.id;
-                            new_chat.access_modes.insert(*chosen_access_mode);
-                            chosen_chat.set(Some(new_chatid));
+                            new_chat.access_modes.insert(db_state.cursors.chosen_access_mode);
+                            db_state.dispatch(DatabaseAction::SetChat(Some(new_chatid)));
                             (new_chatid, starting_context, true, new_chat, config_opt)
                         }
                     };
-                    chosen_tab.set(1);
+                    db_state.dispatch(DatabaseAction::SetTab(1));
                     let proxima_state = proxima_state.clone();
                     let db_state = db_state.clone();
-                    let user_cursors = user_cursors.clone();
                     spawn_local(async move {
                         if created {
                             let (delta, new_id, new_item) = get_delta_for_add(
@@ -674,26 +678,25 @@ pub fn app_page() -> Html {
             };
 
             let new_chat_callback = {
-                let chosen_chat = chosen_chat.clone();
+                let db_state = db_state.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
-                    chosen_chat.set(None);
+                    db_state.dispatch(DatabaseAction::SetChat(None));
                 })
             };
-            let chosen_access_mode = chosen_access_mode.clone();
             let chat_htmls = db_state.db.chats.get_chats().iter().map(|(id, chat)| {
-                let chosen_access_mode = chosen_access_mode.clone();
+                let db_state = db_state.clone();
                 let callback = {
-                    let chosen_chat_clone = chosen_chat.clone();
                     let id_clone = *id;
+                    let db_state = db_state.clone();
                     Callback::from(move |mouse_evt:MouseEvent| {
-                        chosen_chat_clone.set(Some(id_clone));
+                        db_state.dispatch(DatabaseAction::SetChat(Some(id_clone)));
                     })
                 };
 
-                if !chat.access_modes.contains(&*chosen_access_mode) {
+                if !chat.access_modes.contains(&db_state.cursors.chosen_access_mode) {
                     html!()
                 }
-                else if chosen_chat.is_some() && *id == chosen_chat.unwrap() {
+                else if db_state.cursors.chosen_chat.is_some() && *id == db_state.cursors.chosen_chat.unwrap() {
                     html!(
 
                         <div><button onclick={callback} class="chat-option chosen-chat">{match chat.get_title() {Some(title) => title.clone(), None => format!("Chat {}", *id)}}</button></div>
@@ -705,7 +708,7 @@ pub fn app_page() -> Html {
                     )
                 }
             }).collect::<Html>();
-            let chosen_chat_by_id = db_state.db.chats.get_chats().get(&(chosen_chat.unwrap_or(1000000)));
+            let chosen_chat_by_id = db_state.db.chats.get_chats().get(&(db_state.cursors.chosen_chat.unwrap_or(1000000)));
             let config_htmls:Vec<Html> = second_db_here.db.configs.get_configs().iter().enumerate().map(|(id, config)| {
                 html!(
                     <option value={config.name.clone()}>{config.name.clone()}</option>
@@ -713,7 +716,6 @@ pub fn app_page() -> Html {
             }).collect();
 
             let cc_select_callback = {
-                let cc_in_use = cc_in_use.clone();
                 let select_node = cc_select_ref.clone();
                 let db_state = second_db_here.clone();
                 Callback::from(move |mouse_evt:Event| {
@@ -725,14 +727,15 @@ pub fn app_page() -> Html {
                     }) {
                         Some((id, config)) => {
                             let config_data = format!("{:?} {:?}", config.name.clone(), config.tools.is_some());
-                            cc_in_use.set(Some(id));
+                            
+                            db_state.dispatch(DatabaseAction::ChangeUsedChatConfig(Some(id)));
                             spawn_local(async move {
                                 let args = serde_wasm_bindgen::to_value(&PrintArgs {value:config_data}).unwrap();
                                 invoke("print_to_console", args).await;
                             });
                         },
                         None => {
-                            cc_in_use.set(None);
+                            db_state.dispatch(DatabaseAction::ChangeUsedChatConfig(None));
                         }
                     }
                     
@@ -818,21 +821,21 @@ pub fn app_page() -> Html {
         /* Tags */ 2 => {
 
             let tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+                let db_state = db_state.clone();
                 let callback = {
 
-                    let second_db = db_state.db.clone();
-                    let chosen_tag_clone = chosen_tag.clone();
-                    let chosen_parent_tag_clone = chosen_parent_tag.clone();
+                    let second_db = db_state.clone();
                     let id_clone = id;
                     Callback::from(move |mouse_evt:MouseEvent| {
-                        chosen_tag_clone.set(Some(id_clone));
-                        chosen_parent_tag_clone.set(second_db.tags.get_tags()[id_clone].get_parent())
+                        second_db.dispatch(DatabaseAction::SetModifiedTag(Some(id_clone)));
+
+                        second_db.dispatch(DatabaseAction::SetParentTag(second_db.db.tags.get_tags()[id_clone].get_parent()));
                     })
                 };
-                if !db_state.db.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id) {
+                if !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id) {
                     html!()
                 }
-                else if chosen_tag.is_some() && id == chosen_tag.unwrap() {
+                else if db_state.cursors.chosen_tag.is_some() && id == db_state.cursors.chosen_tag.unwrap() {
                     html!(
 
                         <div><button onclick={callback} class="chat-option chosen-chat">{tag.get_name().clone()}</button></div>
@@ -846,17 +849,18 @@ pub fn app_page() -> Html {
             }).collect::<Html>();
 
             let parent_tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+                let db_state = db_state.clone();
                 let callback = {
-                    let chosen_tag_clone = chosen_parent_tag.clone();
                     let id_clone = id;
+                    let second_db = db_state.clone();
                     Callback::from(move |mouse_evt:MouseEvent| {
-                        chosen_tag_clone.set(Some(id_clone));
+                        second_db.dispatch(DatabaseAction::SetParentTag(Some(id_clone)));
                     })
                 };
-                if (chosen_tag.is_some() && id == chosen_tag.unwrap()) || !db_state.db.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id)  {
+                if (db_state.cursors.chosen_tag.is_some() && id == db_state.cursors.chosen_tag.unwrap()) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id)  {
                     html!()
                 }
-                else if chosen_parent_tag.is_some() && id == chosen_parent_tag.unwrap() {
+                else if db_state.cursors.chosen_parent_tag.is_some() && id == db_state.cursors.chosen_parent_tag.unwrap() {
                     html!(
 
                         <div><button onclick={callback} class="chat-option chosen-chat">{tag.get_name().clone()}</button></div>
@@ -870,25 +874,20 @@ pub fn app_page() -> Html {
             }).collect::<Html>();
             
             let new_tag_callback = {
-                let chosen_tag = chosen_tag.clone();
-                let chosen_parent_tag = chosen_parent_tag.clone();
+                let db_state = db_state.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
-                    chosen_tag.set(None);
-                    chosen_parent_tag.set(None);
+                    second_db.dispatch(DatabaseAction::SetModifiedTag(None));
+                    second_db.dispatch(DatabaseAction::SetParentTag(None));
                 })
             };
 
-            let chosen_tag_by_id = db_state.db.tags.get_tags().get((chosen_tag.unwrap_or(1000000)));
+            let chosen_tag_by_id = db_state.db.tags.get_tags().get((db_state.cursors.chosen_tag.unwrap_or(1000000)));
 
             let tag_update_callback = {
-                let chosen_tag = chosen_tag.clone();
-                let chosen_parent_tag = chosen_parent_tag.clone();
                 let db_state = db_state.clone();
                 let tag_name_ref = tag_name_ref.clone();
                 let tag_desc_ref = tag_desc_ref.clone();
-                let chosen_access_mode = chosen_access_mode.clone();
                 let proxima_state = proxima_state.clone();
-                let user_cursors = user_cursors.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
                     let db_state = db_state.clone();
                     
@@ -902,12 +901,12 @@ pub fn app_page() -> Html {
 
                     let description = Description::new(tag_desc);
                     
-                    match *chosen_tag {
+                    match db_state.cursors.chosen_tag {
                         Some(tag_id) => {
                             let mut tag = db_state.db.tags.get_tags()[tag_id].clone();
                             tag.name = tag_name;
                             tag.desc = description;
-                            tag.parent = *chosen_parent_tag;
+                            tag.parent = db_state.cursors.chosen_parent_tag;
                             db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Tag(tag_id), DatabaseItem::Tag(tag.clone()))]));
                             let proxima_state = proxima_state.clone();
                             spawn_local(async move {
@@ -920,17 +919,16 @@ pub fn app_page() -> Html {
                             
                         },
                         None => {
-                            let tag = db_state.db.tags.create_possible_tag(NewTag::new(tag_name, description, *chosen_parent_tag));
+                            let tag = db_state.db.tags.create_possible_tag(NewTag::new(tag_name, description, db_state.cursors.chosen_parent_tag));
                             let mut tag_id = tag.get_id();
 
-                            let am_id = *chosen_access_mode;
+                            let am_id = db_state.cursors.chosen_access_mode;
                             let (new_am_0, new_am_n) = db_state.db.access_modes.get_updated_modes_from_association(am_id, tag_id);
                             db_state.dispatch(DatabaseAction::ApplyUpdates(vec![
                                 (DatabaseItemID::AccessMode(0), DatabaseItem::AccessMode(new_am_0.clone())),
                                 (DatabaseItemID::AccessMode(new_am_n.get_id()), DatabaseItem::AccessMode(new_am_n.clone())),
                             ]));
                             let proxima_state = proxima_state.clone();
-                            let user_cursors = user_cursors.clone();
                             spawn_local(async move {
                                 let (delta, new_id, new_item) = get_delta_for_add(
                                     DatabaseItemID::Tag(tag_id),
@@ -990,7 +988,7 @@ pub fn app_page() -> Html {
                             <div class="chat-tab-current-chat third-level standard-padding-margin-corners">
                                 <h2>
                                     {
-                                        match *chosen_parent_tag {
+                                        match db_state.cursors.chosen_parent_tag {
                                             Some(tag_id) => format!("Currently chosen parent tag : {}", db_state.db.tags.get_tags()[tag_id].get_name().clone()),
                                             None => "Does this tag have a parent ?".to_string()
                                         }
@@ -1027,20 +1025,17 @@ pub fn app_page() -> Html {
             }
         },
         /* Access Modes */ 3 => {
-            let chosen_am = chosen_am_for_creation.clone();
             let access_mode_htmls = db_state.db.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
                 let callback = {
 
-                    let second_db = db_state.db.clone();
-                    let chosen_am_clone = chosen_am.clone();
-                    let chosen_tags = chosen_tags_for_am.clone();
+                    let db_state = db_state.clone();
                     let id_clone = id;
                     Callback::from(move |mouse_evt:MouseEvent| {
-                        chosen_am_clone.set(Some(id_clone));
-                        chosen_tags.set(second_db.access_modes.get_modes()[id_clone].get_tags().clone());
+                        db_state.dispatch(DatabaseAction::SetModifiedAM(None));
+                        db_state.dispatch(DatabaseAction::SetTagsForAM(db_state.db.access_modes.get_modes()[id_clone].get_tags().clone()));
                     })
                 };
-                if chosen_am.is_some() && id == chosen_am.unwrap() {
+                if db_state.cursors.access_mode_for_modification.is_some() && id == db_state.cursors.access_mode_for_modification.unwrap() {
                     html!(
 
                         <div><button onclick={callback} class="chat-option chosen-chat">{access_mode.get_name().clone()}</button></div>
@@ -1054,19 +1049,15 @@ pub fn app_page() -> Html {
             }).collect::<Html>();
 
             let tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
-                let chosen_access_mode = chosen_access_mode.clone();
                 let callback = {
 
-                    let second_db = db_state.db.clone();
-                    let chosen_tags = chosen_tags_for_am.clone();
+                    let db_state = db_state.clone();
                     let id_clone = id;
                     Callback::from(move |mouse_evt:MouseEvent| {
-                        let mut list_clone = (*chosen_tags).clone();
-                        list_clone.insert(id_clone);
-                        chosen_tags.set(list_clone);
+                        db_state.dispatch(DatabaseAction::AddToTagsForAM(id));
                     })
                 };
-                if chosen_tags_for_am.contains(&id) || !db_state.db.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id) {
+                if db_state.cursors.chosen_access_mode_tags.contains(&id) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id) {
                     html!()
                 }
                 else {
@@ -1077,18 +1068,14 @@ pub fn app_page() -> Html {
             }).collect::<Html>();
 
             let chosen_tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
-                let chosen_access_mode = chosen_access_mode.clone();
                 let callback = {
-                    let second_db = db_state.db.clone();
-                    let chosen_tags = chosen_tags_for_am.clone();
+                    let db_state = db_state.clone();
                     let id_clone = id;
                     Callback::from(move |mouse_evt:MouseEvent| {
-                        let mut list_clone = (*chosen_tags).clone();
-                        list_clone.remove(&id);
-                        chosen_tags.set(list_clone);
+                        db_state.dispatch(DatabaseAction::RemoveFromTagsForAM(id));
                     })
                 };
-                if !chosen_tags_for_am.contains(&id) || !db_state.db.access_modes.get_modes()[*chosen_access_mode].get_tags().contains(&id) {
+                if !db_state.cursors.chosen_access_mode_tags.contains(&id) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id) {
                     html!()
                 }
                 else {
@@ -1099,19 +1086,17 @@ pub fn app_page() -> Html {
             }).collect::<Html>();
             
             let new_tag_callback = {
-                let chosen_am = chosen_am_for_creation.clone();
-                let chosen_tags = chosen_tags_for_am.clone();
+
+                let db_state = db_state.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
-                    chosen_am.set(None);
-                    chosen_tags.set(HashSet::new());
+                    db_state.dispatch(DatabaseAction::SetModifiedAM(None));
+                    db_state.dispatch(DatabaseAction::SetTagsForAM(HashSet::new()));
                 })
             };
 
-            let chosen_am_by_id = db_state.db.access_modes.get_modes().get((chosen_am_for_creation.unwrap_or(1000000)));
+            let chosen_am_by_id = db_state.db.access_modes.get_modes().get((db_state.cursors.access_mode_for_modification.unwrap_or(1000000)));
 
             let am_update_callback = {
-                let chosen_am = chosen_am_for_creation.clone();
-                let chosen_tags = chosen_tags_for_am.clone();
                 let db_state = db_state.clone();
                 let proxima_state = proxima_state.clone();
                 let am_name_ref = am_name_ref.clone();
@@ -1122,11 +1107,11 @@ pub fn app_page() -> Html {
                     .unwrap()
                     .value();
 
-                    match *chosen_am {
+                    match db_state.cursors.access_mode_for_modification {
                         Some(am_id) => {
                             let mut am = db_state.db.access_modes.get_modes()[am_id].clone();
                             am.name = am_name;
-                            am.tags = (*chosen_tags).clone();
+                            am.tags = db_state.cursors.chosen_access_mode_tags.clone();
                             db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::AccessMode(am_id), DatabaseItem::AccessMode(am.clone()))]));
                             let proxima_state = proxima_state.clone();
                             spawn_local(async move {
@@ -1138,10 +1123,11 @@ pub fn app_page() -> Html {
                             });
                         },
                         None => {
-                            let am = AccessMode::new(0, (*chosen_tags).clone(), am_name);
+                            let am = AccessMode::new(0, db_state.cursors.chosen_access_mode_tags.clone(), am_name);
                             let id = get_next_id_for_category(&db_state.db, &DatabaseItem::AccessMode(am.clone()));
                             let proxima_state = proxima_state.clone();
-                            let user_cursors = user_cursors.clone();
+
+                            let db_state = db_state.clone();
                             spawn_local(async move {
                                 let (delta, new_id, new_item) = get_delta_for_add(
                                     id,
@@ -1153,7 +1139,7 @@ pub fn app_page() -> Html {
                             });
                         },
                     }
-                    chosen_am.set(None);
+                    db_state.dispatch(DatabaseAction::SetModifiedAM(None));
                 })
             };
 
@@ -1254,13 +1240,10 @@ pub fn app_page() -> Html {
             /* The main area is for configuration of a single setting */
 
             let new_cc_callback = {
-                let user_cursors = user_cursors.clone();
                 let name_ref = cc_name_ref.clone();
                 let db_state = db_state.clone();
                 let proxima_state = proxima_state.clone();
-                let chosen_access_mode = chosen_access_mode.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
-                    let mut cursors_clone = (*user_cursors).clone();
                     
                     let mut db_state = db_state.clone();
                     let proxima_state = proxima_state.clone();
@@ -1269,10 +1252,9 @@ pub fn app_page() -> Html {
                     .value();
                     if !name.trim().is_empty() {
                         let mut config = ChatConfiguration::new(name, vec![]);
-                        config.access_modes.insert((*chosen_access_mode).clone());
+                        config.access_modes.insert(db_state.cursors.chosen_access_mode.clone());
                         let id = get_next_id_for_category(&db_state.db, &DatabaseItem::ChatConfig(config.clone()));
                         let proxima_state = proxima_state.clone();
-                        let user_cursors = user_cursors.clone();
                         spawn_local(async move {
                             let (delta, new_id, new_item) = get_delta_for_add(
                                 id,
@@ -1287,28 +1269,20 @@ pub fn app_page() -> Html {
                 })
             };
             let ccs_htmls = db_state.db.configs.get_configs().iter().enumerate().map(|(id, config)| {
-                let user_cursors = user_cursors.clone();
-                let chosen_access_mode = chosen_access_mode.clone();
                 let callback = {
 
-                    let setting_in_modification = setting_in_modification.clone();
-                    let second_db = db_state.db.clone();
-                    let user_cursors = user_cursors.clone();
-                    let chosen_tags = chosen_tags_for_am.clone();
+                    let db_state = db_state.clone();
                     let id_clone = id;
                     Callback::from(move |mouse_evt:MouseEvent| {
-                        let mut cursors_clone = (*user_cursors).clone();
-                        cursors_clone.config_for_modification = Some(id_clone);
-                        cursors_clone.chosen_setting = None;
-                        setting_in_modification.set(None);
-                        
-                        user_cursors.set(cursors_clone);
+                        db_state.dispatch(DatabaseAction::SetModifiedConfig(Some(id_clone)));
+                        db_state.dispatch(DatabaseAction::SetConfigSettingID(None));
+                        db_state.dispatch(DatabaseAction::SetCurrentSetting(None));
                     })
                 };
-                if !config.access_modes.contains(&*chosen_access_mode) {
+                if !config.access_modes.contains(&db_state.cursors.chosen_access_mode) {
                     html!()
                 }
-                else if user_cursors.config_for_modification.is_some() && id == user_cursors.config_for_modification.unwrap() {
+                else if db_state.cursors.config_for_modification.is_some() && id == db_state.cursors.config_for_modification.unwrap() {
                     html!(
 
                         <div><button onclick={callback} class="chat-option chosen-chat">{config.name.clone()}</button></div>
@@ -1321,32 +1295,23 @@ pub fn app_page() -> Html {
                 }
             }).collect::<Html>();
 
-            let current_cursors = (*user_cursors).clone();
-
-                let setting_in_modification = setting_in_modification.clone();
-            let chosen_cc_settings_htmls = match current_cursors.config_for_modification {
+            let chosen_cc_settings_htmls = match db_state.cursors.config_for_modification {
                 Some(config_id) => {
                     let client_db = db_state.db.clone();
                     client_db.configs.get_configs()[config_id].raw_settings.iter().enumerate().map(|(id, setting)| {
 
-                        let setting_in_modification = setting_in_modification.clone();
-                        let user_cursors = user_cursors.clone();
                         let setting_c = setting.clone();
                         let callback = {
 
-                            let second_db = db_state.db.clone();
-                            let user_cursors = user_cursors.clone();
-                            let chosen_tags = chosen_tags_for_am.clone();
+                            let db_state = db_state.clone();
                             let id_clone = id;
                             let setting_clone = setting_c.clone();
                             Callback::from(move |mouse_evt:MouseEvent| {
-                                let mut cursors_clone = (*user_cursors).clone();
-                                cursors_clone.chosen_setting = Some(id_clone);
-                                setting_in_modification.set(Some(setting_clone.clone()));
-                                user_cursors.set(cursors_clone);
+                                db_state.dispatch(DatabaseAction::SetConfigSettingID(Some(id_clone)));
+                                db_state.dispatch(DatabaseAction::SetCurrentSetting(Some(setting_clone.clone())));
                             })
                         };
-                        if user_cursors.chosen_setting.is_some() && id == user_cursors.chosen_setting.unwrap() {
+                        if db_state.cursors.chosen_setting.is_some() && id == db_state.cursors.chosen_setting.unwrap() {
                             html!(
 
                                 <div><button onclick={callback} class="chat-option chosen-chat">{setting.get_title()}</button></div>
@@ -1368,19 +1333,14 @@ pub fn app_page() -> Html {
             };
 
             let select_settings_callback = {
-                let chosen_access_mode = chosen_access_mode.clone();
                 let select_node = cc_setting_ref.clone();
-                let db_clone = second_db_here.clone();
-                let user_cursors = user_cursors.clone();
-                let chosen_chat = chosen_chat.clone();
-                let chosen_tag = chosen_tag.clone();
-                let chosen_parent_tag = chosen_parent_tag.clone();
-                let setting_in_modification = setting_in_modification.clone();
+                let db_state = second_db_here.clone();
                 Callback::from(move |mouse_evt:Event| {
                     let selected_setting_string = select_node.cast::<web_sys::HtmlInputElement>()
                     .unwrap()
                     .value();
-                    setting_in_modification.set(match selected_setting_string.trim() {
+                    db_state.dispatch(DatabaseAction::SetConfigSettingID(None));
+                    db_state.dispatch(DatabaseAction::SetCurrentSetting(match selected_setting_string.trim() {
                         "Temperature" => Some(ChatSetting::Temperature(70)),
                         "System prompt" => Some(ChatSetting::SystemPrompt(ContextPart::new(vec![], ContextPosition::System))),
                         "Initial Pre-prompt" => Some(ChatSetting::PrePrompt(ContextPart::new(vec![], ContextPosition::User))),
@@ -1389,20 +1349,16 @@ pub fn app_page() -> Html {
                         "Max response length" => Some(ChatSetting::ResponseTokenLimit(10000)),
                         "Tool" => Some(ChatSetting::Tool(ProximaTool::Calculator)),
                         _ => None
-                    });
-                    let mut cursors_copy = (*user_cursors).clone();
-                    cursors_copy.chosen_setting = None;
-                    user_cursors.set(cursors_copy);
+                    }));
                 })
             };
 
             let on_click_callback = {
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
                 let db_state = db_state.clone();
-                let setting_in_modification = setting_in_modification.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
                     let cc_setting_value_ref = cc_setting_value_ref.clone();
-                    let new_setting = match (*setting_in_modification).clone() {
+                    let new_setting = match (db_state.cursors.setting_for_modification).clone() {
                         Some(setting) => match setting {
                             ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
@@ -1439,7 +1395,8 @@ pub fn app_page() -> Html {
                             panic!("Impossible, the button should only exist if this is Some(...)")
                         }
                     };
-                    setting_in_modification.set(Some(new_setting));
+
+                    db_state.dispatch(DatabaseAction::SetCurrentSetting(Some(new_setting)));
                 }
                 )
             };
@@ -1447,10 +1404,9 @@ pub fn app_page() -> Html {
             let on_change_callback = {
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
                 let db_state = db_state.clone();
-                let setting_in_modification = setting_in_modification.clone();
                 Callback::from(move |mouse_evt:Event| {
                     let cc_setting_value_ref = cc_setting_value_ref.clone();
-                    let new_setting = match (*setting_in_modification).clone() {
+                    let new_setting = match (db_state.cursors.setting_for_modification).clone() {
                         Some(setting) => match setting {
                             ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
@@ -1487,23 +1443,20 @@ pub fn app_page() -> Html {
                             panic!("Impossible, the button should only exist if this is Some(...)")
                         }
                     };
-                    setting_in_modification.set(Some(new_setting));
+                    db_state.dispatch(DatabaseAction::SetCurrentSetting(Some(new_setting)));
                 }
                 )
             };
 
             let add_update_settings_callback = {
-                let user_cursors = user_cursors.clone();
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
                 let client_db = db_state.clone();
                 let proxima_state = proxima_state.clone();
-                let setting_in_modification = setting_in_modification.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
-                    let mut cursors_clone = (*user_cursors).clone();
                     let cc_setting_value_ref = cc_setting_value_ref.clone();
                     let proxima_state = proxima_state.clone();
                     let db_state = client_db.clone();
-                    let new_setting = match (*setting_in_modification).clone() {
+                    let new_setting = match (db_state.cursors.setting_for_modification).clone() {
                         Some(setting) => match setting {
                             ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
@@ -1540,22 +1493,20 @@ pub fn app_page() -> Html {
                             panic!("Impossible, the button should only exist if this is Some(...)")
                         }
                     };
-                    let setting_in_modification = setting_in_modification.clone();
-                    setting_in_modification.set(Some(new_setting.clone()));
-                    match cursors_clone.config_for_modification {
+                    db_state.dispatch(DatabaseAction::SetCurrentSetting(Some(new_setting.clone())));
+                    match db_state.cursors.config_for_modification {
                         Some(config_id) => {
                             let proxima_state = proxima_state.clone();
-                            let user_cursors = user_cursors.clone();
                             spawn_local(async move {
                                 let mut config = db_state.db.configs.get_configs()[config_id].clone();
-                                let mut cursors_clone = (*user_cursors).clone();
 
-                                match cursors_clone.chosen_setting {
+                                match db_state.cursors.chosen_setting {
                                     Some(setting) => {
                                         config.raw_settings[setting] = new_setting.clone();
                                     },
                                     None => {
-                                        cursors_clone.chosen_setting = Some(config.raw_settings.len());
+
+                                        db_state.dispatch(DatabaseAction::SetConfigSettingID(Some(config.raw_settings.len())));
                                         config.raw_settings.push((new_setting.clone()));
                                     },
                                 }
@@ -1570,7 +1521,6 @@ pub fn app_page() -> Html {
                                         Err(()) => ()
                                     }
                                 });
-                                user_cursors.set(cursors_clone);
                             });
                         },
                         None => ()
@@ -1580,7 +1530,7 @@ pub fn app_page() -> Html {
                 })
             };
             let setting_config = {
-                match (*setting_in_modification).clone() {
+                match (db_state.cursors.setting_for_modification).clone() {
                     Some(setting) => match setting {
                         ChatSetting::PrePrompt(prompt) => 
                         {
@@ -1685,7 +1635,7 @@ pub fn app_page() -> Html {
                         <h1>{"Configuration settings"}</h1>
                         <h2>
                         {
-                            match user_cursors.config_for_modification {
+                            match db_state.cursors.config_for_modification {
                                 Some(config) => html!({format!("For : {}", db_state.db.configs.get_configs()[config].name.clone())}),
                                 None => html!()
                             }
@@ -1719,10 +1669,10 @@ pub fn app_page() -> Html {
 
                         <div class="label-input-combo bottom-bar most-horizontal-space-no-flex">
                             {
-                                match (*setting_in_modification).clone() {
+                                match (db_state.cursors.setting_for_modification).clone() {
                                     Some(setting) => html!(<button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={add_update_settings_callback}>
                                         {
-                                            match current_cursors.chosen_setting {
+                                            match db_state.cursors.chosen_setting {
                                                 Some(tag) => {"Update setting".to_string()},
                                                 None => "Add setting".to_string()    
                                             }
@@ -1742,12 +1692,8 @@ pub fn app_page() -> Html {
     };
     let access_mode_select = use_node_ref();
     let access_mode_callback = {
-        let chosen_access_mode = chosen_access_mode.clone();
         let select_node = access_mode_select.clone();
         let db_clone = second_db_here.clone();
-        let chosen_chat = chosen_chat.clone();
-        let chosen_tag = chosen_tag.clone();
-        let chosen_parent_tag = chosen_parent_tag.clone();
         Callback::from(move |mouse_evt:Event| {
             let access_mode_name = select_node.cast::<web_sys::HtmlInputElement>()
             .unwrap()
@@ -1758,15 +1704,15 @@ pub fn app_page() -> Html {
                 Some((id, access_mode)) => {
                     let second_db_clone = db_clone.clone();
                     let access_mode_name_clone = access_mode_name.clone();
-                    if *chosen_access_mode != id {
-                        chosen_chat.set(None);
-                        chosen_tag.set(None);
-                        chosen_parent_tag.set(None);
-                    }
-                    chosen_access_mode.set(id);
-                    spawn_local(async move {
+                    if db_state.cursors.chosen_access_mode != id {
+                        db_state.dispatch(DatabaseAction::SetChat(None));
                         
-
+                        db_state.dispatch(DatabaseAction::SetModifiedTag(None));
+                        db_state.dispatch(DatabaseAction::SetParentTag(None));
+                    }
+                    
+                    db_state.dispatch(DatabaseAction::SetGlobalAM(id));
+                    spawn_local(async move {
                         let args = serde_wasm_bindgen::to_value(&PrintArgs {value:access_mode_name_clone}).unwrap();
                         invoke("print_to_console", args).await;
 

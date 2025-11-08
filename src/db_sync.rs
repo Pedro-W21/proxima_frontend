@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use proxima_backend::{database::{DatabaseInfoReply, DatabaseInfoRequest, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase}, web_payloads::{DBPayload, DBResponse}};
+use proxima_backend::{database::{DatabaseInfoReply, DatabaseInfoRequest, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase, configuration::ChatSetting}, web_payloads::{DBPayload, DBResponse}};
 
 pub enum NeedToSync {
     Everything,
@@ -27,16 +27,18 @@ pub struct UserCursors {
     pub chosen_access_mode:usize,
     pub access_mode_for_modification:Option<usize>,
     pub chosen_tag:Option<usize>,
+    pub chosen_tags:HashSet<usize>,
     pub chosen_parent_tag:Option<usize>,
     pub chosen_config:Option<usize>,
     pub config_for_modification:Option<usize>,
     pub chosen_setting:Option<usize>,
+    pub setting_for_modification:Option<ChatSetting>,
     pub chosen_access_mode_tags:HashSet<usize>,
 }
 
 impl UserCursors {
     pub fn zero() -> Self {
-        Self { chosen_tab:0, chosen_chat: None, chosen_access_mode: 0, access_mode_for_modification: None, chosen_tag: None, chosen_parent_tag: None, chosen_access_mode_tags: HashSet::new(), chosen_config:None, config_for_modification:None, chosen_setting:None }
+        Self { chosen_tab:0, chosen_chat: None, chosen_access_mode: 0, access_mode_for_modification: None, chosen_tag: None, chosen_parent_tag: None, chosen_access_mode_tags: HashSet::new(), chosen_config:None, config_for_modification:None, chosen_setting:None, setting_for_modification:None, chosen_tags:HashSet::new() }
     }
     pub fn from_state(
         chosen_tab:usize,
@@ -50,7 +52,7 @@ impl UserCursors {
         config_for_modification:Option<usize>,
         chosen_access_mode_tags:HashSet<usize>
     ) -> Self {
-        Self { chosen_tab, chosen_chat, chosen_access_mode, access_mode_for_modification, chosen_tag, chosen_parent_tag, chosen_access_mode_tags, chosen_config, config_for_modification, chosen_setting }
+        Self { chosen_tab, chosen_chat, chosen_access_mode, access_mode_for_modification, chosen_tag, chosen_parent_tag, chosen_access_mode_tags, chosen_config, config_for_modification, chosen_setting, setting_for_modification:None, chosen_tags:HashSet::new() }
     }
 }
 
