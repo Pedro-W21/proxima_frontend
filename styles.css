@@ -104,6 +104,7 @@ tr td {
   background-color:#568b3e;
 }
 
+
 .chat-part {
   display: flex;
   flex-direction: row;
@@ -141,6 +142,10 @@ tr td {
 
 .third-level {
   background-color: #407a25;
+}
+
+.nonuser-turn {
+  background-color:#29421e;
 }
 
 .standard-padding-margin-corners {

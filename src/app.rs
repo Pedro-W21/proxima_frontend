@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use yew::{html::ChildrenProps, platform::pinned::mpsc::UnboundedSender, prelude::*, virtual_dom::VNode};
 use gloo_utils::format::JsValueSerdeExt;
-use proxima_backend::{ai_interaction::{endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, tools::{ProximaTool, Tools}}, database::{access_modes::AccessMode, chats::{Chat, ChatID, SessionType}, configuration::{ChatConfiguration, ChatSetting}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
+use proxima_backend::{ai_interaction::{endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, tools::{ProximaTool, Tools}}, database::{DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase, access_modes::AccessMode, chats::{Chat, ChatID, SessionType}, configuration::{ChatConfiguration, ChatSetting, RepeatPosition}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
 use yew::prelude::*;
 use selectrs::yew::{Select, Group};
 use markdown::to_html;
@@ -443,6 +443,8 @@ pub fn app_page() -> Html {
     let cc_name_ref = use_node_ref();
     let cc_setting_ref = use_node_ref();
     let cc_setting_value_ref = use_node_ref();
+    let cc_second_setting_value_ref = use_node_ref();
+    let cc_third_setting_value_ref = use_node_ref();
     let second_db_here = db_state.clone();
     let current_app = match db_state.cursors.chosen_tab {
         /*Home*/ 0 => {
@@ -586,6 +588,10 @@ pub fn app_page() -> Html {
                                 }
                             };
                             chat.add_to_context(context_part);
+                            match &config_opt {
+                                Some(configuration) => chat.context.add_per_turn_settings(configuration),
+                                None => ()
+                            }
                             (chatid, chat.get_context().clone(), false, chat.clone(), config_opt)
                         },
                         None => {
@@ -620,7 +626,6 @@ pub fn app_page() -> Html {
                                 DatabaseItem::Chat(start_chat.clone()),
                                 async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
                             ).await;
-
                             if new_id != DatabaseItemID::Chat(local_id) {
                                 local_id = match new_id {
                                     DatabaseItemID::Chat(id) => id,
@@ -776,8 +781,7 @@ pub fn app_page() -> Html {
                                         chat.context.get_parts().iter().map(|context_part| {
                                             if context_part.in_visible_position() {
                                                 html!(
-                                                    <div>
-                                                    <h3>{if context_part.is_user() {proxima_state.username.clone() + " : "} else {"Proxima : ".to_string()}}</h3>
+                                                    <div class={if context_part.is_user() {"standard-padding-margin-corners"} else {"standard-padding-margin-corners nonuser-turn"}}>
                                                     <div> {context_part.data_to_text().iter().map(|string| {VNode::from_html_unchecked(AttrValue::from(to_html(&string)))}).collect::<Vec<Html>>() /*context_part.data_to_text().iter().map(|string| {string.split('\n').collect::<Vec<&str>>()}).flatten().map(|string| {html!(string)}).intersperse(html!(<br/>)).collect::<Vec<Html>>()*/}</div>
                                                     </div>
                                                 )
@@ -1344,7 +1348,7 @@ pub fn app_page() -> Html {
                         "Temperature" => Some(ChatSetting::Temperature(70)),
                         "System prompt" => Some(ChatSetting::SystemPrompt(ContextPart::new(vec![], ContextPosition::System))),
                         "Initial Pre-prompt" => Some(ChatSetting::PrePrompt(ContextPart::new(vec![], ContextPosition::User))),
-                        "Pre-prompt at chat end" => Some(ChatSetting::PrePromptBeforeLatest(ContextPart::new(vec![], ContextPosition::User))),
+                        "Repeated Pre-prompt" => Some(ChatSetting::RepeatedPrePrompt(ContextPart::new(vec![], ContextPosition::User), RepeatPosition::AfterLatest)),
                         "Max context length" => Some(ChatSetting::MaxContextLength(10000)),
                         "Max response length" => Some(ChatSetting::ResponseTokenLimit(10000)),
                         "Tool" => Some(ChatSetting::Tool(ProximaTool::Calculator)),
@@ -1355,6 +1359,8 @@ pub fn app_page() -> Html {
 
             let on_click_callback = {
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
+                let cc_second_setting_value_ref = cc_second_setting_value_ref.clone();
+                let cc_third_setting_value_ref = cc_third_setting_value_ref.clone();
                 let db_state = db_state.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
                     let cc_setting_value_ref = cc_setting_value_ref.clone();
@@ -1363,9 +1369,28 @@ pub fn app_page() -> Html {
                             ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
                                 ], ContextPosition::User)),
-                            ChatSetting::PrePromptBeforeLatest(prompt) => ChatSetting::PrePromptBeforeLatest(ContextPart::new(vec![
+                            ChatSetting::RepeatedPrePrompt(prompt, position) => ChatSetting::RepeatedPrePrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
-                                ], ContextPosition::User)),
+                                ], 
+                                match cc_second_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                    "User" => ContextPosition::User,
+                                    "AI" => ContextPosition::AI,
+                                    val => {
+                                        let value = val.to_string();
+                                        spawn_local(async move {
+                                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("got {}", value)}).unwrap();
+                                            invoke("print_to_console", args).await;
+                                        });
+                                        ContextPosition::User
+                                },
+                                }
+                                ),
+                                match cc_third_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                    "Before latest" => RepeatPosition::BeforeLatest,
+                                    "After latest" => RepeatPosition::AfterLatest,
+                                    _ => RepeatPosition::AfterLatest
+                                }
+                            ),
                             ChatSetting::Temperature(temp) => ChatSetting::Temperature(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                             ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
@@ -1403,6 +1428,8 @@ pub fn app_page() -> Html {
 
             let on_change_callback = {
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
+                let cc_second_setting_value_ref = cc_second_setting_value_ref.clone();
+                let cc_third_setting_value_ref = cc_third_setting_value_ref.clone();
                 let db_state = db_state.clone();
                 Callback::from(move |mouse_evt:Event| {
                     let cc_setting_value_ref = cc_setting_value_ref.clone();
@@ -1411,9 +1438,21 @@ pub fn app_page() -> Html {
                             ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
                                 ], ContextPosition::User)),
-                            ChatSetting::PrePromptBeforeLatest(prompt) => ChatSetting::PrePromptBeforeLatest(ContextPart::new(vec![
+                            ChatSetting::RepeatedPrePrompt(prompt, position) => ChatSetting::RepeatedPrePrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
-                                ], ContextPosition::User)),
+                                ], 
+                                match cc_second_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                    "User" => ContextPosition::User,
+                                    "AI" => ContextPosition::AI,
+                                    _ => ContextPosition::User
+                                }
+                                ),
+                                match cc_third_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                    "Before latest" => RepeatPosition::BeforeLatest,
+                                    "After latest" => RepeatPosition::AfterLatest,
+                                    _ => RepeatPosition::AfterLatest
+                                }
+                            ),
                             ChatSetting::Temperature(temp) => ChatSetting::Temperature(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                             ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
@@ -1450,6 +1489,8 @@ pub fn app_page() -> Html {
 
             let add_update_settings_callback = {
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
+                let cc_second_setting_value_ref = cc_second_setting_value_ref.clone();
+                let cc_third_setting_value_ref = cc_third_setting_value_ref.clone();
                 let client_db = db_state.clone();
                 let proxima_state = proxima_state.clone();
                 Callback::from(move |mouse_evt:MouseEvent| {
@@ -1461,9 +1502,21 @@ pub fn app_page() -> Html {
                             ChatSetting::PrePrompt(prompt) => ChatSetting::PrePrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
                                 ], ContextPosition::User)),
-                            ChatSetting::PrePromptBeforeLatest(prompt) => ChatSetting::PrePromptBeforeLatest(ContextPart::new(vec![
+                            ChatSetting::RepeatedPrePrompt(prompt, position) => ChatSetting::RepeatedPrePrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
-                                ], ContextPosition::User)),
+                                ], 
+                                match cc_second_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                    "User" => ContextPosition::User,
+                                    "AI" => ContextPosition::AI,
+                                    _ => ContextPosition::User
+                                }
+                                ),
+                                match cc_third_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                    "Before latest" => RepeatPosition::BeforeLatest,
+                                    "After latest" => RepeatPosition::AfterLatest,
+                                    _ => RepeatPosition::AfterLatest
+                                }
+                            ),
                             ChatSetting::Temperature(temp) => ChatSetting::Temperature(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                             ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
@@ -1542,13 +1595,27 @@ pub fn app_page() -> Html {
                                 </div>
                             )
                         },
-                        ChatSetting::PrePromptBeforeLatest(prompt) => 
+                        ChatSetting::RepeatedPrePrompt(prompt, position) => 
                         {
                             let text = prompt.data_to_text().concat();
                             html!(    
-                                <div class="label-input-combo second-level standard-padding-margin-corners">
-                                    <div><p>{"Pre-prompt added after all of your prompts : "}</p></div>
-                                    <div class="label-input-combo"><textarea class="standard-padding-margin-corners" rows="10" placeholder="Pre-prompt here..." onclick={on_click_callback} onchange={on_change_callback} id="pre_prompt" ref={cc_setting_value_ref} defaultvalue={text}/></div>
+                                <div class="second-level standard-padding-margin-corners">
+                                    <div><p>{"Pre-prompt added before the latest message : "}</p></div>
+                                    <div class="label-input-combo"><textarea class="standard-padding-margin-corners" rows="10" placeholder="Pre-prompt here..." onclick={on_click_callback.clone()} onchange={on_change_callback.clone()} id="pre_prompt" ref={cc_setting_value_ref} defaultvalue={text}/></div>
+                                    <div class="label-input-combo">
+                                        <p>{"Role of the pre-prompt : "}</p>
+                                        <select class="standard-padding-margin-corners" id="role_select" ref={cc_second_setting_value_ref} onchange={on_change_callback.clone()} onclick={on_click_callback.clone()}>
+                                            <option value={"User"}>{"User"}</option>
+                                            <option value={"AI"}>{"AI"}</option>
+                                        </select>
+                                    </div>
+                                    <div class="label-input-combo">
+                                        <p>{"Position of the pre-prompt : "}</p>
+                                        <select class="standard-padding-margin-corners" id="position_select" ref={cc_third_setting_value_ref} onchange={on_change_callback} onclick={on_click_callback}>
+                                            <option value={"Before latest"}>{"Before latest"}</option>
+                                            <option value={"After latest"}>{"After latest"}</option>
+                                        </select>
+                                    </div>
                                 </div>
                             )
                         },
@@ -1645,7 +1712,7 @@ pub fn app_page() -> Html {
                             <option value={"Temperature"}>{"Temperature"}</option>
                             <option value={"System prompt"}>{"System prompt"}</option>
                             <option value={"Initial Pre-prompt"}>{"Initial Pre-prompt"}</option>
-                            <option value={"Pre-prompt at chat end"}>{"Pre-prompt at chat end"}</option>
+                            <option value={"Repeated Pre-prompt"}>{"Repeated Pre-prompt"}</option>
                             <option value={"Max context length"}>{"Max context length"}</option>
                             <option value={"Max response length"}>{"Max response length"}</option>
                             <option value={"Tool"}>{"Tool"}</option>
