@@ -782,7 +782,7 @@ pub fn app_page() -> Html {
                                             if context_part.in_visible_position() {
                                                 html!(
                                                     <div class={if context_part.is_user() {"standard-padding-margin-corners"} else {"standard-padding-margin-corners nonuser-turn"}}>
-                                                    <div> {context_part.data_to_text().iter().map(|string| {VNode::from_html_unchecked(AttrValue::from(to_html(&string)))}).collect::<Vec<Html>>() /*context_part.data_to_text().iter().map(|string| {string.split('\n').collect::<Vec<&str>>()}).flatten().map(|string| {html!(string)}).intersperse(html!(<br/>)).collect::<Vec<Html>>()*/}</div>
+                                                    <div> {context_part.data_to_text().iter().map(|string| {VNode::from_html_unchecked(AttrValue::from(to_html(&string.lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}).collect::<Vec<Html>>() /*context_part.data_to_text().iter().map(|string| {string.split('\n').collect::<Vec<&str>>()}).flatten().map(|string| {html!(string)}).intersperse(html!(<br/>)).collect::<Vec<Html>>()*/}</div>
                                                     </div>
                                                 )
                                             }
@@ -1398,6 +1398,7 @@ pub fn app_page() -> Html {
                             ChatSetting::Tool(tool) => ChatSetting::Tool(match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
                                 "Calculator" => ProximaTool::Calculator,
                                 "Local Memory" => ProximaTool::LocalMemory,
+                                "Web" => ProximaTool::Web,
                                 _ => panic!("Impossible")
                             }),
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -1460,6 +1461,7 @@ pub fn app_page() -> Html {
                             ChatSetting::Tool(tool) => ChatSetting::Tool(match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
                                 "Calculator" => ProximaTool::Calculator,
                                 "Local Memory" => ProximaTool::LocalMemory,
+                                "Web" => ProximaTool::Web,
                                 _ => panic!("Impossible")
                             }),
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -1524,6 +1526,7 @@ pub fn app_page() -> Html {
                             ChatSetting::Tool(tool) => ChatSetting::Tool(match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
                                 "Calculator" => ProximaTool::Calculator,
                                 "Local Memory" => ProximaTool::LocalMemory,
+                                "Web" => ProximaTool::Web,
                                 _ => panic!("Impossible")
                             }),
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -1642,6 +1645,7 @@ pub fn app_page() -> Html {
                                 <select class="standard-padding-margin-corners" id="tool_select" ref={cc_setting_value_ref}>
                                     <option value={"Calculator"}>{"Calculator"}</option>
                                     <option value={"Local Memory"}>{"Local Memory"}</option>
+                                    <option value={"Web"}>{"Web"}</option>
                                 </select>
                             </div>
                         ),
