@@ -806,17 +806,18 @@ pub fn app_page() -> Html {
                                 }
                             }
                             </div>
+                            <div class="label-input-combo bottom-bar most-horizontal-space-no-flex third-level standard-padding-margin-corners">
+                                <textarea placeholder="Have a prompt ?" ref={prompt_node_ref} class="standard-padding-margin-corners"/>
+                                <select class="standard-padding-margin-corners" ref={cc_select_ref} onchange={cc_select_callback}>
+                                    <option value="NO CHAT CONFIG WHATSOEVER (please do not use this magic name for a real chat config)">{"None"}</option>
+                                    {config_htmls}
+                                </select>
+                                <button class="mainapp-button standard-padding-margin-corners" onclick={prompt_send_callback}>{"Send"}</button>
+                                
+                            </div>
                         </div>
 
-                        <div class="label-input-combo bottom-bar most-horizontal-space-no-flex third-level standard-padding-margin-corners">
-                            <textarea placeholder="Have a prompt ?" ref={prompt_node_ref} class="standard-padding-margin-corners"/>
-                            <select class="standard-padding-margin-corners" ref={cc_select_ref} onchange={cc_select_callback}>
-                                <option value="NO CHAT CONFIG WHATSOEVER (please do not use this magic name for a real chat config)">{"None"}</option>
-                                {config_htmls}
-                            </select>
-                            <button class="mainapp-button standard-padding-margin-corners" onclick={prompt_send_callback}>{"Send"}</button>
-                            
-                        </div>
+                        
                     </div>
                     
                 </div>
@@ -1399,6 +1400,7 @@ pub fn app_page() -> Html {
                                 "Calculator" => ProximaTool::Calculator,
                                 "Local Memory" => ProximaTool::LocalMemory,
                                 "Web" => ProximaTool::Web,
+                                "Python" => ProximaTool::Python,
                                 _ => panic!("Impossible")
                             }),
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -1462,6 +1464,7 @@ pub fn app_page() -> Html {
                                 "Calculator" => ProximaTool::Calculator,
                                 "Local Memory" => ProximaTool::LocalMemory,
                                 "Web" => ProximaTool::Web,
+                                "Python" => ProximaTool::Python,
                                 _ => panic!("Impossible")
                             }),
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -1527,6 +1530,7 @@ pub fn app_page() -> Html {
                                 "Calculator" => ProximaTool::Calculator,
                                 "Local Memory" => ProximaTool::LocalMemory,
                                 "Web" => ProximaTool::Web,
+                                "Python" => ProximaTool::Python,
                                 _ => panic!("Impossible")
                             }),
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -1646,6 +1650,7 @@ pub fn app_page() -> Html {
                                     <option value={"Calculator"}>{"Calculator"}</option>
                                     <option value={"Local Memory"}>{"Local Memory"}</option>
                                     <option value={"Web"}>{"Web"}</option>
+                                    <option value={"Python"}>{"Python"}</option>
                                 </select>
                             </div>
                         ),
@@ -1808,7 +1813,7 @@ pub fn app_page() -> Html {
                     <button class="menu-item" id={values[2].clone()} onclick={tab_picker_callbacks[2].clone()}>{"Tags"}</button>
                     <button class="menu-item" id={values[3].clone()} onclick={tab_picker_callbacks[3].clone()}>{"Access Modes"}</button>
                     <button class="menu-item" id={values[4].clone()} onclick={tab_picker_callbacks[4].clone()}>{"Files"}</button>
-                    <button class="menu-item" id={values[5].clone()} onclick={tab_picker_callbacks[5].clone()}>{"Settings"}</button>
+                    <button class="menu-item" id={values[5].clone()} onclick={tab_picker_callbacks[5].clone()}>{"Configurations"}</button>
                     <select class="menu-item" ref={access_mode_select} onchange={access_mode_callback}>
                         {access_modes_htmls}
                     </select>
