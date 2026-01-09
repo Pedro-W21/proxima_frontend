@@ -749,22 +749,26 @@ pub fn app_page() -> Html {
             html!{
                 <div class="chat-part">
                     <div class="all-vertical-space standard-padding-margin-corners first-level">
-                        <h1>{"Past chats"}</h1>
-                        <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_chat_callback}>{"New chat"}</button>
-                        <hr/>
-                        <div class="list-holder">
-                            {
-                                if db_state.db.chats.get_chats().len() > 0 {
-                                    chat_htmls
+                        <div class="list-plus-other-col">
+                            <div>
+                                <h1>{"Past chats"}</h1>
+                                <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_chat_callback}>{"New chat"}</button>
+                                <hr/>
+                            </div>
+                            <div class="list-holder all-vertical-space-flex">
+                                {
+                                    if db_state.db.chats.get_chats().len() > 0 {
+                                        chat_htmls
+                                    }
+                                    else {
+                                        html!({"No chats yet !"})
+                                    }
                                 }
-                                else {
-                                    html!({"No chats yet !"})
-                                }
-                            }
+                            </div>
                         </div>
                     </div>
                     <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
-                        <div class="chat-tab-current-chat second-level standard-padding-margin-corners">
+                        <div class="list-plus-other-col">
                             <h1>{
                             match chosen_chat_by_id {
                                 Some(chat) => match &chat.chat_title {
@@ -956,19 +960,23 @@ pub fn app_page() -> Html {
             html!{
                 <div class="chat-part">
                     <div class="all-vertical-space standard-padding-margin-corners first-level">
-                        <h1>{"Tags"}</h1>
-                        <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_tag_callback}>{"New tag"}</button>
-                        <hr/>
+                        <div class="list-plus-other-col">
+                            <div>
+                                <h1>{"Tags"}</h1>
+                                <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_tag_callback}>{"New tag"}</button>
+                                <hr/>
+                            </div>
 
-                        <div class="list-holder">
-                            {
-                                if db_state.db.tags.get_tags().len() > 0 {
-                                    tag_htmls
+                            <div class="list-holder">
+                                {
+                                    if db_state.db.tags.get_tags().len() > 0 {
+                                        tag_htmls
+                                    }
+                                    else {
+                                        html!({"No tags yet !"})
+                                    }
                                 }
-                                else {
-                                    html!({"No tags yet !"})
-                                }
-                            }
+                            </div>
                         </div>
                     </div>
                     <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
@@ -990,7 +998,7 @@ pub fn app_page() -> Html {
                                 <p>{"Tag description (optional) : "}</p>
                                 <input class="standard-padding-margin-corners" placeholder="Enter tag descirption here... keep it simple !" ref={tag_desc_ref}/>
                             </div>
-                            <div class="chat-tab-current-chat third-level standard-padding-margin-corners">
+                            <div class="list-plus-other-col third-level standard-padding-margin-corners">
                                 <h2>
                                     {
                                         match db_state.cursors.chosen_parent_tag {
@@ -1151,19 +1159,24 @@ pub fn app_page() -> Html {
             html!{
                 <div class="chat-part">
                     <div class="all-vertical-space standard-padding-margin-corners first-level">
-                        <h1>{"Access Modes"}</h1>
-                        <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_tag_callback}>{"New Access Mode"}</button>
-                        <hr/>
 
-                        <div class="list-holder">
-                            {
-                                if db_state.db.access_modes.get_modes().len() > 0 {
-                                    access_mode_htmls
+                        <div class="list-plus-other-col">
+                            <div>
+                                <h1>{"Access Modes"}</h1>
+                                <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_tag_callback}>{"New Access Mode"}</button>
+                                <hr/>
+                            </div>
+
+                            <div class="list-holder">
+                                {
+                                    if db_state.db.access_modes.get_modes().len() > 0 {
+                                        access_mode_htmls
+                                    }
+                                    else {
+                                        html!({"Something is very wrong, you are supposed to have AT LEAST 1 Access mode"})
+                                    }
                                 }
-                                else {
-                                    html!({"Something is very wrong, you are supposed to have AT LEAST 1 Access mode"})
-                                }
-                            }
+                            </div>
                         </div>
                     </div>
                     <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
@@ -1180,7 +1193,7 @@ pub fn app_page() -> Html {
                                 <input class="standard-padding-margin-corners" placeholder="Enter an access mode name here..." ref={am_name_ref}/>
                                 
                             </div>
-                            <div class="chat-tab-current-chat third-level standard-padding-margin-corners">
+                            <div class="list-plus-other-col third-level standard-padding-margin-corners">
                                 <h2>
                                     {"What tags are associated with this access mode ?"}
                                 </h2>
@@ -1691,47 +1704,57 @@ pub fn app_page() -> Html {
             html!(
                 <div class="chat-part">
                     <div class="all-vertical-space standard-padding-margin-corners first-level at-most-a-sixth-width">
-                        <h1>{"Chat configurations"}</h1>
-                        <input class="standard-padding-margin-corners most-horizontal-space-no-flex" placeholder="Chat config name..." ref={cc_name_ref}/>
-                        <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={new_cc_callback}>{"New Chat Configuration"}</button>
-                        <hr/>
 
-                        <div class="list-holder most-horizontal-space-no-flex">
-                            {
-                                if db_state.db.configs.get_configs().len() > 0 {
-                                    ccs_htmls
+                        <div class="list-plus-other-col">
+                            <div>
+                                <h1>{"Chat configurations"}</h1>
+                                <input class="standard-padding-margin-corners most-horizontal-space-no-flex" placeholder="Chat config name..." ref={cc_name_ref}/>
+                                <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={new_cc_callback}>{"New Chat Configuration"}</button>
+                                <hr/>
+                            </div>
+
+                            <div class="list-holder most-horizontal-space-no-flex">
+                                {
+                                    if db_state.db.configs.get_configs().len() > 0 {
+                                        ccs_htmls
+                                    }
+                                    else {
+                                        html!({"To create a chat configuration, please give it a non-empty name and click \"New Configuration\" above"})
+                                    }
                                 }
-                                else {
-                                    html!({"To create a chat configuration, please give it a non-empty name and click \"New Configuration\" above"})
-                                }
-                            }
+                            </div>
                         </div>
                     </div>
                     <div class="all-vertical-space standard-padding-margin-corners first-level at-most-a-sixth-width">
-                        <h1>{"Configuration settings"}</h1>
-                        <h2>
-                        {
-                            match db_state.cursors.config_for_modification {
-                                Some(config) => html!({format!("For : {}", db_state.db.configs.get_configs()[config].name.clone())}),
-                                None => html!()
-                            }
-                        }
-                        </h2>
-                        <select class="most-horizontal-space-no-flex standard-padding-margin-corners" ref={cc_setting_ref} onchange={select_settings_callback}>
-                            <option value={"Temperature"}>{"Temperature"}</option>
-                            <option value={"System prompt"}>{"System prompt"}</option>
-                            <option value={"Initial Pre-prompt"}>{"Initial Pre-prompt"}</option>
-                            <option value={"Repeated Pre-prompt"}>{"Repeated Pre-prompt"}</option>
-                            <option value={"Max context length"}>{"Max context length"}</option>
-                            <option value={"Max response length"}>{"Max response length"}</option>
-                            <option value={"Tool"}>{"Tool"}</option>
-                        </select>
-                        <hr/>
 
-                        <div class="list-holder most-horizontal-space-no-flex">
-                            {
-                                chosen_cc_settings_htmls
-                            }
+                        <div class="list-plus-other-col">
+                            <div>
+                                <h1>{"Configuration settings"}</h1>
+                                <h2>
+                                {
+                                    match db_state.cursors.config_for_modification {
+                                        Some(config) => html!({format!("For : {}", db_state.db.configs.get_configs()[config].name.clone())}),
+                                        None => html!()
+                                    }
+                                }
+                                </h2>
+                                <select class="most-horizontal-space-no-flex standard-padding-margin-corners" ref={cc_setting_ref} onchange={select_settings_callback}>
+                                    <option value={"Temperature"}>{"Temperature"}</option>
+                                    <option value={"System prompt"}>{"System prompt"}</option>
+                                    <option value={"Initial Pre-prompt"}>{"Initial Pre-prompt"}</option>
+                                    <option value={"Repeated Pre-prompt"}>{"Repeated Pre-prompt"}</option>
+                                    <option value={"Max context length"}>{"Max context length"}</option>
+                                    <option value={"Max response length"}>{"Max response length"}</option>
+                                    <option value={"Tool"}>{"Tool"}</option>
+                                </select>
+                                <hr/>
+                            </div>
+
+                            <div class="list-holder most-horizontal-space-no-flex">
+                                {
+                                    chosen_cc_settings_htmls
+                                }
+                            </div>
                         </div>
                     </div>
                     <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
