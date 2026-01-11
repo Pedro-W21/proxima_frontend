@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use yew::{html::ChildrenProps, platform::pinned::mpsc::UnboundedSender, prelude::*, virtual_dom::VNode};
 use gloo_utils::format::JsValueSerdeExt;
-use proxima_backend::{ai_interaction::{endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, tools::{ProximaTool, Tools}}, database::{DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase, access_modes::AccessMode, chats::{Chat, ChatID, SessionType}, configuration::{ChatConfiguration, ChatSetting, RepeatPosition}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
+use proxima_backend::{ai_interaction::{endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, tools::{AgentToolData, ProximaTool, ProximaToolData, Tools}}, database::{DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase, access_modes::AccessMode, chats::{Chat, ChatID, SessionType}, configuration::{ChatConfiguration, ChatSetting, RepeatPosition}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
 use yew::prelude::*;
 use selectrs::yew::{Select, Group};
 use markdown::to_html;
@@ -431,7 +431,7 @@ pub fn app_page() -> Html {
         })
     }).collect();
 
-
+    let allocatable_agent_tools = use_state(|| HashSet::<ProximaTool>::new());
     let selected_value = use_state(|| "Option1".to_string());
 
     let pseudo_node_ref = use_node_ref();
@@ -675,9 +675,6 @@ pub fn app_page() -> Html {
                                 Err(_) => ()
                             }
                         }
-                        
-
-
                     });
                 })
             };
@@ -1365,13 +1362,14 @@ pub fn app_page() -> Html {
                         "Repeated Pre-prompt" => Some(ChatSetting::RepeatedPrePrompt(ContextPart::new(vec![], ContextPosition::User), RepeatPosition::AfterLatest)),
                         "Max context length" => Some(ChatSetting::MaxContextLength(10000)),
                         "Max response length" => Some(ChatSetting::ResponseTokenLimit(10000)),
-                        "Tool" => Some(ChatSetting::Tool(ProximaTool::Calculator)),
+                        "Tool" => Some(ChatSetting::Tool(ProximaTool::Calculator, None)),
                         _ => None
                     }));
                 })
             };
 
             let on_click_callback = {
+                let allocatable = allocatable_agent_tools.clone();
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
                 let cc_second_setting_value_ref = cc_second_setting_value_ref.clone();
                 let cc_third_setting_value_ref = cc_third_setting_value_ref.clone();
@@ -1409,13 +1407,16 @@ pub fn app_page() -> Html {
                             ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
                                 ], ContextPosition::System)),
-                            ChatSetting::Tool(tool) => ChatSetting::Tool(match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
-                                "Calculator" => ProximaTool::Calculator,
-                                "Local Memory" => ProximaTool::LocalMemory,
-                                "Web" => ProximaTool::Web,
-                                "Python" => ProximaTool::Python,
+                            ChatSetting::Tool(tool, _) => match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                "Calculator" => ChatSetting::Tool(ProximaTool::Calculator, None),
+                                "Local Memory" => ChatSetting::Tool(ProximaTool::LocalMemory, None),
+                                "Web" => ChatSetting::Tool(ProximaTool::Web, None),
+                                "Python" => ChatSetting::Tool(ProximaTool::Python, None),
+                                "Agent" => ChatSetting::Tool(ProximaTool::Agent, Some(ProximaToolData::Agent(
+                                        AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
+                                    ))),
                                 _ => panic!("Impossible")
-                            }),
+                            },
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                             ChatSetting::ResponseTokenLimit(limit) => ChatSetting::ResponseTokenLimit(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                             ChatSetting::AccessMode(access_mode) => {
@@ -1443,6 +1444,7 @@ pub fn app_page() -> Html {
             };
 
             let on_change_callback = {
+                let allocatable = allocatable_agent_tools.clone();
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
                 let cc_second_setting_value_ref = cc_second_setting_value_ref.clone();
                 let cc_third_setting_value_ref = cc_third_setting_value_ref.clone();
@@ -1473,13 +1475,18 @@ pub fn app_page() -> Html {
                             ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
                                 ], ContextPosition::System)),
-                            ChatSetting::Tool(tool) => ChatSetting::Tool(match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
-                                "Calculator" => ProximaTool::Calculator,
-                                "Local Memory" => ProximaTool::LocalMemory,
-                                "Web" => ProximaTool::Web,
-                                "Python" => ProximaTool::Python,
+                            ChatSetting::Tool(tool, _) => match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                "Calculator" => ChatSetting::Tool(ProximaTool::Calculator, None),
+                                "Local Memory" => ChatSetting::Tool(ProximaTool::LocalMemory, None),
+                                "Web" => ChatSetting::Tool(ProximaTool::Web, None),
+                                "Python" => ChatSetting::Tool(ProximaTool::Python, None),
+                                "Agent" => {
+                                    ChatSetting::Tool(ProximaTool::Agent, Some(ProximaToolData::Agent(
+                                        AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
+                                    )))
+                                },
                                 _ => panic!("Impossible")
-                            }),
+                            },
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                             ChatSetting::ResponseTokenLimit(limit) => ChatSetting::ResponseTokenLimit(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                             ChatSetting::AccessMode(access_mode) => {
@@ -1506,6 +1513,7 @@ pub fn app_page() -> Html {
             };
 
             let add_update_settings_callback = {
+                let allocatable = allocatable_agent_tools.clone();
                 let cc_setting_value_ref = cc_setting_value_ref.clone();
                 let cc_second_setting_value_ref = cc_second_setting_value_ref.clone();
                 let cc_third_setting_value_ref = cc_third_setting_value_ref.clone();
@@ -1539,13 +1547,16 @@ pub fn app_page() -> Html {
                             ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
                                 ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
                                 ], ContextPosition::System)),
-                            ChatSetting::Tool(tool) => ChatSetting::Tool(match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
-                                "Calculator" => ProximaTool::Calculator,
-                                "Local Memory" => ProximaTool::LocalMemory,
-                                "Web" => ProximaTool::Web,
-                                "Python" => ProximaTool::Python,
+                            ChatSetting::Tool(tool, data) => match cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                "Calculator" => ChatSetting::Tool(ProximaTool::Calculator, None),
+                                "Local Memory" => ChatSetting::Tool(ProximaTool::LocalMemory, None),
+                                "Web" => ChatSetting::Tool(ProximaTool::Web, None),
+                                "Python" => ChatSetting::Tool(ProximaTool::Python, None),
+                                "Agent" => ChatSetting::Tool(ProximaTool::Agent, Some(ProximaToolData::Agent(
+                                        AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
+                                    ))),
                                 _ => panic!("Impossible")
-                            }),
+                            },
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                             ChatSetting::ResponseTokenLimit(limit) => ChatSetting::ResponseTokenLimit(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                             ChatSetting::AccessMode(access_mode) => {
@@ -1656,17 +1667,70 @@ pub fn app_page() -> Html {
                                 </div>
                             )
                         },
-                        ChatSetting::Tool(tool) => html!(
-                            <div class="label-input-combo second-level standard-padding-margin-corners">
-                                <p>{"System prompt part : "}</p>
-                                <select class="standard-padding-margin-corners" id="tool_select" ref={cc_setting_value_ref}>
-                                    <option value={"Calculator"}>{"Calculator"}</option>
-                                    <option value={"Local Memory"}>{"Local Memory"}</option>
-                                    <option value={"Web"}>{"Web"}</option>
-                                    <option value={"Python"}>{"Python"}</option>
-                                </select>
-                            </div>
-                        ),
+                        ChatSetting::Tool(tool,_) => {
+                            let addition = match tool {
+                                ProximaTool::Agent => {
+                                    let second_setting = cc_second_setting_value_ref.clone();
+                                    let add_tool_callback = {
+                                        let allocatable_agent_tools = allocatable_agent_tools.clone();
+                                        let second_setting = second_setting;
+                                        Callback::from(move |mouse_evt:MouseEvent| {
+                                            let new_tool = match second_setting.cast::<web_sys::HtmlInputElement>().unwrap().value().trim() {
+                                                "Calculator" => ProximaTool::Calculator,
+                                                "Local Memory" => ProximaTool::LocalMemory,
+                                                "Web" => ProximaTool::Web,
+                                                "Python" => ProximaTool::Python,
+                                                "Agent" => ProximaTool::Agent,
+                                                _ => panic!("Should be impossible")
+                                            };
+                                            let mut allocatable = (*allocatable_agent_tools).clone();
+                                            allocatable.insert(new_tool);
+                                            allocatable_agent_tools.set(allocatable);
+                                        })
+                                    };
+                                    let clear_tools_callback = {
+                                        let allocatable_agent_tools = allocatable_agent_tools.clone();
+                                        Callback::from(move |mouse_evt:MouseEvent| {
+                                            allocatable_agent_tools.set(HashSet::new());
+                                        })
+                                    };
+                                    html!(
+                                        <div>
+                                            <h2>{"Tools that can be allocated to agents"}</h2>
+                                            <select class="standard-padding-margin-corners" id="tool_allocation_select" ref={cc_second_setting_value_ref}>
+                                                <option value={"Calculator"}>{"Calculator"}</option>
+                                                <option value={"Local Memory"}>{"Local Memory"}</option>
+                                                <option value={"Web"}>{"Web"}</option>
+                                                <option value={"Python"}>{"Python"}</option>
+                                                <option value={"Agent"}>{"Agent"}</option>
+                                            </select>
+                                            <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={add_tool_callback}>{"Add"}</button>
+                                            <div class="list-holder">
+                                                {
+                                                    allocatable_agent_tools.iter().map(|tool| {html!(<label>{tool.get_name().as_str()}</label>)}).collect::<Html>()
+                                                }
+                                            </div>
+
+                                            <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={clear_tools_callback}>{"Clear list"}</button>
+                                        </div>
+                                    )
+                                },
+                                _ => html!()
+                            };
+                            html!(
+                                <div class="label-input-combo second-level standard-padding-margin-corners">
+                                    <p>{"Tool to add : "}</p>
+                                    <select class="standard-padding-margin-corners" id="tool_select" ref={cc_setting_value_ref}>
+                                        <option value={"Calculator"}>{"Calculator"}</option>
+                                        <option value={"Local Memory"}>{"Local Memory"}</option>
+                                        <option value={"Web"}>{"Web"}</option>
+                                        <option value={"Python"}>{"Python"}</option>
+                                        <option value={"Agent"}>{"Agent"}</option>
+                                    </select>
+                                    {addition}
+                                </div>
+                            )
+                        },
                         ChatSetting::MaxContextLength(length) => html!(
                             <div class="label-input-combo second-level standard-padding-margin-corners">
                                 <p>{format!("Max context length (in tokens) : {}", length)}</p>
