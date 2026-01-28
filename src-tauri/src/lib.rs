@@ -86,20 +86,35 @@ async fn ai_endpoint_post_request(state: tauri::State<'_,ProximaState>, app_stat
             match response {
                 Ok(data) => {
                     let mut stream = data.bytes_stream();
-                    let mut total = ContextPart::new(vec![], ContextPosition::AI);
+                    let mut total = whole_context.clone();
+                    let mut current_part = ContextPart::new(vec![], ContextPosition::AI);
+                    let mut token_id:u64 = 0;
                     while let Some(item) = stream.next().await {
                         match item {
                             Ok(bytes) => {
                                 let u8s:Vec<u8> = bytes.to_vec();
                                 let string = String::from_utf8_lossy_owned(u8s);
                                 if let Ok(request_variant) = serde_json::from_str::<EndpointResponseVariant>(&string) {
-                                    app_state.emit("chat-token", (request_variant.clone(), second.chat_id));
+                                    app_state.emit("chat-token", (request_variant.clone(), second.chat_id, token_id)).unwrap();
+                                    token_id += 1;
                                     match request_variant {
-                                        EndpointResponseVariant::StartStream(data, _) | EndpointResponseVariant::ContinueStream(data, _) => {
-                                            total.add_data(data);
+                                        EndpointResponseVariant::StartStream(data, pos) | EndpointResponseVariant::ContinueStream(data, pos) => {
+
+                                            println!("[backend] emitting chat-token event for chat {} ! event : {}", second.chat_id, data.get_text());
+                                            if pos == *current_part.get_position() {
+                                                current_part.add_data(data);
+                                            }
+                                            else {
+                                                current_part.concatenate_text();
+                                                total.add_part(current_part.clone());
+                                                current_part = ContextPart::new(vec![data], pos);
+                                            }
                                         },
                                         _ => ()
                                     }
+                                }
+                                else {
+                                    dbg!("Getting invalid events : ", string);
                                 }
                                 
                             },
@@ -108,9 +123,9 @@ async fn ai_endpoint_post_request(state: tauri::State<'_,ProximaState>, app_stat
                             },
                         }
                     }
-                    total.concatenate_text();
-                    dbg!(total.get_data()[0].get_text());
-                    Ok(AIResponse { reply: EndpointResponseVariant::Block(total) })
+                    current_part.concatenate_text();
+                    total.add_part(current_part);
+                    Ok(AIResponse { reply: EndpointResponseVariant::MultiTurnBlock(total) })
                 },
                 Err(error) => Err(())
             }

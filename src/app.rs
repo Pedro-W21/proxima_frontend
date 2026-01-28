@@ -1,6 +1,6 @@
-use std::{collections::HashSet, path::PathBuf, thread, time::Duration};
+use std::{collections::{HashMap, HashSet}, path::PathBuf, thread, time::Duration};
 
-use chrono::Utc;
+use chrono::{DateTime, TimeDelta, Utc};
 use gloo_events::EventListener;
 use reqwest::header::{HeaderMap, HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -222,14 +222,26 @@ pub fn loading_page() -> Html {
 #[derive(PartialEq)]
 struct DatabaseState {
     db:ProxDatabase,
-    cursors:UserCursors
+    cursors:UserCursors,
+    update_flipper:bool,
+    token_streams:HashMap<ChatID, StreamingData>
+}
+
+#[derive(Clone, PartialEq)]
+struct StreamingData {
+    token_ids:Vec<(u64, DateTime<Utc>)>,
+    all_ids:HashSet<u64>,
+    last_update:DateTime<Utc>,
+    last_part_pos:ContextPosition
 }
 
 impl Default for DatabaseState {
     fn default() -> Self {
         Self {
             db:ProxDatabase::new_just_data(String::from("a"), String::from("a")),
-            cursors:UserCursors::zero()
+            cursors:UserCursors::zero(),
+            update_flipper:false,
+            token_streams:HashMap::with_capacity(16),
         }
     }
 }
@@ -250,7 +262,17 @@ enum DatabaseAction {
     SetTagsForAM(HashSet<TagID>),
     SetConfigSettingID(Option<usize>),
     SetCurrentSetting(Option<ChatSetting>),
-    SetModifiedConfig(Option<usize>)
+    SetModifiedConfig(Option<usize>),
+    AddPartToChat {
+        chat_id:ChatID,
+        token_id:u64,
+        part:ContextPart
+    },
+    AddDataToLastPartOfChat {
+        chat_id:ChatID,
+        token_id:u64,
+        data:ContextData
+    }
 }
 
 impl Reducible for DatabaseState {
@@ -258,6 +280,18 @@ impl Reducible for DatabaseState {
     fn reduce(self: std::rc::Rc<Self>, action: Self::Action) -> std::rc::Rc<Self> {
         let mut database = self.db.clone();
         let mut cursors = self.cursors.clone();
+        let mut update_flipper = self.update_flipper;
+        let mut token_streams = self.token_streams.clone();
+        let now = Utc::now();
+        let mut to_remove = Vec::with_capacity(2);
+        for (chat_id, stream) in &mut token_streams {
+            if stream.last_update.signed_duration_since(now).abs() > TimeDelta::minutes(3) {
+                to_remove.push(*chat_id);
+            }
+        }
+        for rem in to_remove {
+            token_streams.remove(&rem);
+        }
         match action {
             DatabaseAction::SetDB(db) => database = db,
             DatabaseAction::ApplyUpdates(updates) => {cursors = apply_server_updates(&mut database, updates, cursors);},
@@ -289,10 +323,60 @@ impl Reducible for DatabaseState {
             DatabaseAction::SetTagsForAM(tags) => cursors.chosen_access_mode_tags = tags,
             DatabaseAction::SetConfigSettingID(id) => cursors.chosen_setting = id,
             DatabaseAction::SetCurrentSetting(setting) => cursors.setting_for_modification = setting,
-            DatabaseAction::SetModifiedConfig(config) => cursors.config_for_modification = config
+            DatabaseAction::SetModifiedConfig(config) => cursors.config_for_modification = config,
+            DatabaseAction::AddPartToChat { chat_id, token_id, part } => {
+                update_flipper = !update_flipper;
+                database.chats.get_chats_mut().get_mut(&chat_id).map(|chat| {
+                    match token_streams.get_mut(&chat_id) {
+                        Some(stream) => {
+                            if now.signed_duration_since(stream.last_update).abs() > TimeDelta::seconds(1) || stream.last_part_pos != part.get_position().clone() {
+                                token_streams.insert(chat_id, StreamingData { token_ids: vec![(token_id, Utc::now())], all_ids:HashSet::from([token_id]), last_update:now, last_part_pos:part.get_position().clone() });
+                                chat.context.add_part(part);
+                            }
+                        },
+                        None => {
+                            token_streams.insert(chat_id, StreamingData { token_ids: vec![(token_id, Utc::now())], all_ids:HashSet::from([token_id]), last_update:Utc::now(), last_part_pos:part.get_position().clone() });
+                            chat.context.add_part(part);
+                        }
+                    }
+                });
+            },
+            DatabaseAction::AddDataToLastPartOfChat {
+                chat_id,
+                token_id,
+                data
+            } => {
+
+                update_flipper = !update_flipper;
+                database.chats.get_chats_mut().get_mut(&chat_id).map(|chat| {
+
+                    match token_streams.get_mut(&chat_id) {
+                        Some(stream) => {
+                            if !stream.all_ids.contains(&token_id) {
+                                let last_part = chat.context.get_parts_mut().last_mut().unwrap();
+                                match last_part.get_data_mut().last_mut().unwrap() {
+                                    ContextData::Text(text) => {
+                                        match data {
+                                            ContextData::Text(new_text) => *text += &new_text,
+                                            ContextData::Media(image) => last_part.add_data(ContextData::Media(image)),
+                                        }
+                                    },
+                                    ContextData::Media(image) => {
+                                        last_part.add_data(data);
+                                    }
+                                }
+                                stream.all_ids.insert(token_id);
+                                stream.last_update = Utc::now();
+                                stream.token_ids.push((token_id, stream.last_update.clone()));
+                            }
+                        },
+                        None => ()
+                    }
+                });
+            }
 
         }
-        DatabaseState{db:database, cursors}.into()
+        DatabaseState{db:database, cursors, update_flipper, token_streams}.into()
     }
 }
 
@@ -326,7 +410,7 @@ pub fn app_page() -> Html {
     let second_db = db_state.clone();
 
     use_effect_with(
-        event_div_node_ref.clone(),
+        second_db.clone(),
         {
             let div_node_ref = event_div_node_ref.clone();
             let second_db = second_db.clone();
@@ -342,55 +426,71 @@ pub fn app_page() -> Html {
                         
                     });
                     spawn_local(async move {
-                        let mut listener = tauri_sys::event::listen::<(EndpointResponseVariant, ChatID)>("chat-token").await.unwrap();
+                        let mut listener = tauri_sys::event::listen::<(EndpointResponseVariant, ChatID, u64)>("chat-token").await.unwrap();
+
+                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("STARTED LISTENING")}).unwrap();
+                        invoke("print_to_console", args).await;
                         let (mut listener, mut abort_handle) = futures::stream::abortable(listener);
-                        while let Some(raw_event) = listener.next().await {
+                        if let Some(raw_event) = listener.next().await {
+
+                            
                             let event = raw_event.payload.0;
                             let chat_id = raw_event.payload.1;
-                            let proxima_state = proxima_state.clone();
+                            let token_id = raw_event.payload.2;
 
-                            let mut chat = db_state.db.chats.get_chats().get(&chat_id).unwrap().clone();
+                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S FOR CHAT_ID {chat_id} | CHAT LEN {} | EVENT ID {}", db_state.db.chats.get_chats().len(), raw_event.id)}).unwrap();
+                            invoke("print_to_console", args).await;
+
+                            //let chat = db_state.db.chats.get_chats().get(&chat_id).unwrap().clone();
+
+
+                            //let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("CHAT PARTS LEN {} | LAST CHAT PART LEN {:?}", chat.context.get_parts().len(), chat.context.get_parts().last().map(|val| {val.get_data().len()}))}).unwrap();
+                            //invoke("print_to_console", args).await;
 
                             match event {
                                 EndpointResponseVariant::StartStream(data, position) => {
-                                    chat.context.add_part(ContextPart::new(vec![data], position));
+
+                                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S A START STREAM EVENT")}).unwrap();
+                                    invoke("print_to_console", args).await;
+                                    db_state.dispatch(DatabaseAction::AddPartToChat{
+                                        chat_id,
+                                        token_id,
+                                        part:ContextPart::new(vec![data], position)
+                                    });
                                 },
                                 EndpointResponseVariant::ContinueStream(data, position) => {
-                                    let last_part = chat.context.get_parts_mut().last_mut().unwrap();
-                                    match last_part.get_data_mut().last_mut().unwrap() {
-                                        ContextData::Text(text) => {
-                                            match data {
-                                                ContextData::Text(new_text) => *text += &new_text,
-                                                ContextData::Image(image) => last_part.add_data(ContextData::Image(image)),
-                                            }
-                                        },
-                                        ContextData::Image(image) => {
-                                            last_part.add_data(data);
-                                        }
-                                    } 
+                                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S A CONTINUE STREAM EVENT")}).unwrap();
+                                    invoke("print_to_console", args).await;
+                                    db_state.dispatch(DatabaseAction::AddDataToLastPartOfChat {
+                                        chat_id,
+                                        token_id,
+                                        data
+                                    });
+                                    
+                                     
                                 },
                                 EndpointResponseVariant::EndStream(data, position) => {
+                                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S A END STREAM EVENT")}).unwrap();
+                                    invoke("print_to_console", args).await;
                                     panic!("Odd, not supposed to get that yet");
                                 },
-                                _ => panic!("Impossible to get that here")
+                                _ => {
+
+                                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S AN IMPOSSIBLE STREAM EVENT")}).unwrap();
+                                    invoke("print_to_console", args).await;
+                                    panic!("Impossible to get that here")
+                                }
                             }
-                            let chat_clone = chat.clone();
-                            let id = DatabaseItemID::Chat(chat_clone.id);
-                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(id, DatabaseItem::Chat(chat))]));
-                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("GOT THERE IN EVENT YAHOOO")}).unwrap();
+
+                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("FINISHED EVENT YAHOOO")}).unwrap();
                             invoke("print_to_console", args).await;
-                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat_clone)) };
-                            match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                Ok(response) => (),
-                                Err(()) => ()
-                            }
                         }
                     });
                     // Create a Closure from a Box<dyn Fn> - this has to be 'static
                     let listener = EventListener::new(
                         &element,
                         "chat-token",
-                        move |e| oncustard.emit(e.clone())
+                        move |e| {}
                     );
 
                     custard_listener = Some(listener);
@@ -489,7 +589,7 @@ pub fn app_page() -> Html {
 
                         db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
 
-                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: false, session_type: SessionType::Chat, chat_settings:None });
+                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: true, session_type: SessionType::Chat, chat_settings:None });
                         
                         let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
 
@@ -639,41 +739,39 @@ pub fn app_page() -> Html {
                             db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(local_id), DatabaseItem::Chat(start_chat.clone()))]));
                         }
 
-                        let streaming = false;
+                        let streaming = true;
 
                         let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming, session_type: SessionType::Chat, chat_settings:config_opt });
 
 
                         let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
-                        if !streaming {
-                            match value {
-                                Ok(response) => {
-                                    match response.reply {
-                                        EndpointResponseVariant::Block(context_part) => {
-                                            let mut chat = start_chat.clone();
-                                            chat.add_to_context(context_part);
-                                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
-                                            match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                                Ok(response) => (),
-                                                Err(()) => ()
-                                            }
-                                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(chat.id), DatabaseItem::Chat(chat))]));
-                                        },
-                                        EndpointResponseVariant::MultiTurnBlock(whole_context) => {
-                                            let mut chat = start_chat.clone();
-                                            chat.context = whole_context;
-                                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
-                                            match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                                Ok(response) => (),
-                                                Err(()) => ()
-                                            }
-                                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(chat.id), DatabaseItem::Chat(chat))]));
+                        match value {
+                            Ok(response) => {
+                                match response.reply {
+                                    EndpointResponseVariant::Block(context_part) => {
+                                        let mut chat = start_chat.clone();
+                                        chat.add_to_context(context_part);
+                                        let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
+                                        match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                            Ok(response) => (),
+                                            Err(()) => ()
                                         }
-                                        _ => ()
+                                        db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(chat.id), DatabaseItem::Chat(chat))]));
+                                    },
+                                    EndpointResponseVariant::MultiTurnBlock(whole_context) => {
+                                        let mut chat = start_chat.clone();
+                                        chat.context = whole_context;
+                                        let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
+                                        match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                            Ok(response) => (),
+                                            Err(()) => ()
+                                        }
+                                        db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(chat.id), DatabaseItem::Chat(chat))]));
                                     }
-                                },
-                                Err(_) => ()
-                            }
+                                    _ => ()
+                                }
+                            },
+                            Err(_) => ()
                         }
                     });
                 })

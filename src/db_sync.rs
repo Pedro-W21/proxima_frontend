@@ -179,6 +179,9 @@ pub fn apply_server_updates(client_db: &mut ProxDatabase, updates:Vec<(DatabaseI
             DatabaseItem::UserData(user_data) => {
                 client_db.personal_info.user_data = user_data
             },
+            DatabaseItem::Media(med, data) => {
+                client_db.media.insert_media_raw(med);
+            }
         }
     }
     new_cursors
@@ -193,7 +196,8 @@ pub fn get_next_id_for_category(db:&ProxDatabase, category:&DatabaseItem) -> Dat
         DatabaseItem::File(_) => DatabaseItemID::File(db.files.len()),
         DatabaseItem::Folder(_) => DatabaseItemID::Folder(db.folders.number_of_folders()),
         DatabaseItem::Tag(_) => DatabaseItemID::Tag(db.tags.get_tags().len()),
-        DatabaseItem::UserData(_) => DatabaseItemID::UserData
+        DatabaseItem::UserData(_) => DatabaseItemID::UserData,
+        DatabaseItem::Media(med, _) => DatabaseItemID::Media(med.hash)
     }
 }
 pub async fn get_delta_for_add<F:AsyncFn(DatabaseRequestVariant) -> Result<DatabaseReplyVariant, ()>>(local_given_id:DatabaseItemID, mut added_item:DatabaseItem, request_func:F) -> (Vec<(DatabaseItemID, DatabaseItem)>, DatabaseItemID, DatabaseItem) {
