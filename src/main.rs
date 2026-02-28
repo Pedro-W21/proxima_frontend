@@ -1,6 +1,7 @@
 #![feature(iter_intersperse)]
 mod app;
 mod db_sync;
+mod notification_tab;
 
 use app::App;
 

@@ -15,7 +15,7 @@ use markdown::to_html;
 use web_sys::{EventTarget, HtmlElement};
 use futures::StreamExt;
 
-use crate::db_sync::{UserCursors, apply_server_updates, get_delta_for_add, get_next_id_for_category, handle_add, handle_add_reducible};
+use crate::{db_sync::{UserCursors, apply_server_updates, get_delta_for_add, get_next_id_for_category, handle_add, handle_add_reducible}, notification_tab::NotificationTab};
 
 #[wasm_bindgen]
 extern "C" {
@@ -176,7 +176,7 @@ pub fn initialize_page() -> Html {
     }
 }
 
-async fn make_db_request(payload:DBPayload, backend_url:String) -> Result<DBResponse, ()> {
+pub async fn make_db_request(payload:DBPayload, backend_url:String) -> Result<DBResponse, ()> {
     let args = serde_wasm_bindgen::to_value(&HttpDBPostRequest {request:payload, url:backend_url + "/db"}).unwrap();
 
     let return_val = invoke("database_post_request", args).await;
@@ -195,7 +195,7 @@ pub struct SecondArgument {
 }
 
 
-async fn make_ai_request(payload:AIPayload, backend_url:String, chat_id:ChatID) -> Result<AIResponse, ()> {
+pub async fn make_ai_request(payload:AIPayload, backend_url:String, chat_id:ChatID) -> Result<AIResponse, ()> {
     let args = serde_wasm_bindgen::to_value(&HttpAIPostRequest {request:payload, second:SecondArgument { url: backend_url + "/ai", chat_id }}).unwrap();
 
     let return_val = invoke("ai_endpoint_post_request", args).await;
@@ -220,11 +220,11 @@ pub fn loading_page() -> Html {
 }
 
 #[derive(PartialEq)]
-struct DatabaseState {
-    db:ProxDatabase,
-    cursors:UserCursors,
-    update_flipper:bool,
-    token_streams:HashMap<ChatID, StreamingData>
+pub struct DatabaseState {
+    pub db:ProxDatabase,
+    pub cursors:UserCursors,
+    pub update_flipper:bool,
+    pub token_streams:HashMap<ChatID, StreamingData>
 }
 
 #[derive(Clone, PartialEq)]
@@ -246,10 +246,11 @@ impl Default for DatabaseState {
     }
 }
 
-enum DatabaseAction {
+pub enum DatabaseAction {
     SetDB(ProxDatabase),
     ApplyUpdates(Vec<(DatabaseItemID, DatabaseItem)>),
     AddItem(Vec<(DatabaseItemID, DatabaseItem)>, DatabaseItemID, DatabaseItem),
+    RemoveItem(DatabaseItemID),
     SetTab(usize),
     SetChat(Option<usize>),
     SetModifiedAM(Option<usize>),
@@ -311,6 +312,9 @@ impl Reducible for DatabaseState {
                 );
                 cursors = new_cursors;
             },
+            DatabaseAction::RemoveItem(item_id) => {
+                database.remove_request(item_id);
+            }
             DatabaseAction::SetChat(chat) => cursors.chosen_chat = chat,
             DatabaseAction::SetTab(tab) => cursors.chosen_tab = tab,
             DatabaseAction::SetGlobalAM(am) => cursors.chosen_access_mode = am,
@@ -589,7 +593,7 @@ pub fn app_page() -> Html {
 
                         db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
 
-                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: true, session_type: SessionType::Chat, chat_settings:None, chat_id:Some(local_id) });
+                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: true, session_type: SessionType::Chat, chat_settings:None, chat_id:Some(local_id), access_mode:db_state.cursors.chosen_access_mode });
                         
                         let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
 
@@ -741,7 +745,7 @@ pub fn app_page() -> Html {
 
                         let streaming = true;
 
-                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming, session_type: SessionType::Chat, chat_settings:config_opt, chat_id:Some(local_id) });
+                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming, session_type: SessionType::Chat, chat_settings:config_opt, chat_id:Some(local_id), access_mode:db_state.cursors.chosen_access_mode });
 
 
                         let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
@@ -1961,6 +1965,14 @@ pub fn app_page() -> Html {
                 </div>
             )
         },
+        /* Notifications */6 => {
+            let db_state = db_state.clone();
+            html!(
+                <ContextProvider<UseReducerHandle<DatabaseState>> context={db_state.clone()}>
+                    <NotificationTab/>
+                </ContextProvider<UseReducerHandle<DatabaseState>>>
+            )
+        }
         _ => html!({"Something is very wrong"})
     };
     let access_mode_select = use_node_ref();
@@ -2011,6 +2023,7 @@ pub fn app_page() -> Html {
                     <button class="menu-item" id={values[3].clone()} onclick={tab_picker_callbacks[3].clone()}>{"Access Modes"}</button>
                     <button class="menu-item" id={values[4].clone()} onclick={tab_picker_callbacks[4].clone()}>{"Files"}</button>
                     <button class="menu-item" id={values[5].clone()} onclick={tab_picker_callbacks[5].clone()}>{"Configurations"}</button>
+                    <button class="menu-item" id={values[6].clone()} onclick={tab_picker_callbacks[6].clone()}>{"Notifications"}</button>
                     <select class="menu-item" ref={access_mode_select} onchange={access_mode_callback}>
                         {access_modes_htmls}
                     </select>
@@ -2055,13 +2068,13 @@ impl Reducible for BoolState {
 
 #[derive(PartialEq, Clone, Eq)]
 pub struct ProximaState {
-    initialized:bool,
-    loaded:bool,
-    username:String,
-    auth_token:String,
-    chat_url:String,
-    device_id:DeviceID,
-    start_db:Option<ProxDatabase>
+    pub initialized:bool,
+    pub loaded:bool,
+    pub username:String,
+    pub auth_token:String,
+    pub chat_url:String,
+    pub device_id:DeviceID,
+    pub start_db:Option<ProxDatabase>
 }
 
 pub enum ProximaStateAction {

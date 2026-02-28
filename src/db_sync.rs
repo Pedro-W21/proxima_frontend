@@ -182,8 +182,11 @@ pub fn apply_server_updates(client_db: &mut ProxDatabase, updates:Vec<(DatabaseI
             DatabaseItem::Media(med, data) => {
                 client_db.media.insert_media_raw(med);
             },
-            DatabaseItem::Memory(_, _) => {
-                
+            DatabaseItem::Memory(mem, _) => {
+
+            },
+            DatabaseItem::Notification(notif) => {
+                client_db.notifications.insert_notification_raw(notif);
             }
         }
     }
@@ -201,7 +204,8 @@ pub fn get_next_id_for_category(db:&ProxDatabase, category:&DatabaseItem) -> Dat
         DatabaseItem::Tag(_) => DatabaseItemID::Tag(db.tags.get_tags().len()),
         DatabaseItem::UserData(_) => DatabaseItemID::UserData,
         DatabaseItem::Media(med, _) => DatabaseItemID::Media(med.hash),
-        DatabaseItem::Memory(mem, _) => DatabaseItemID::Memory(db.memories.memories.len())
+        DatabaseItem::Memory(_, _) => DatabaseItemID::Memory(db.memories.last_memory_id),
+        DatabaseItem::Notification(_) => DatabaseItemID::Notification(db.notifications.latest_id)
     }
 }
 pub async fn get_delta_for_add<F:AsyncFn(DatabaseRequestVariant) -> Result<DatabaseReplyVariant, ()>>(local_given_id:DatabaseItemID, mut added_item:DatabaseItem, request_func:F) -> (Vec<(DatabaseItemID, DatabaseItem)>, DatabaseItemID, DatabaseItem) {

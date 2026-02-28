@@ -76,7 +76,7 @@ pub struct SecondArgument {
 #[tauri::command(async)]
 async fn ai_endpoint_post_request(state: tauri::State<'_,ProximaState>, app_state:tauri::AppHandle, request:AIPayload, second:SecondArgument) -> Result<AIResponse, ()> {
     match request.request.clone() {
-        EndpointRequestVariant::RespondToFullPrompt { whole_context, streaming, session_type, chat_settings, chat_id } => if streaming {
+        EndpointRequestVariant::RespondToFullPrompt { whole_context, streaming, session_type, chat_settings, chat_id, access_mode } => if streaming {
             let response = reqwest::Client::new()
                 .post(second.url)
                 .json(&request)
