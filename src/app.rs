@@ -589,7 +589,7 @@ pub fn app_page() -> Html {
 
                         db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
 
-                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: true, session_type: SessionType::Chat, chat_settings:None });
+                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming: true, session_type: SessionType::Chat, chat_settings:None, chat_id:Some(local_id) });
                         
                         let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
 
@@ -741,7 +741,7 @@ pub fn app_page() -> Html {
 
                         let streaming = true;
 
-                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming, session_type: SessionType::Chat, chat_settings:config_opt });
+                        let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming, session_type: SessionType::Chat, chat_settings:config_opt, chat_id:Some(local_id) });
 
 
                         let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
@@ -924,22 +924,22 @@ pub fn app_page() -> Html {
         }
         /* Tags */ 2 => {
 
-            let tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+            let tag_htmls = db_state.db.tags.get_tags().iter().map(|(id, tag)| {
                 let db_state = db_state.clone();
                 let callback = {
 
                     let second_db = db_state.clone();
-                    let id_clone = id;
+                    let id_clone = *id;
                     Callback::from(move |mouse_evt:MouseEvent| {
                         second_db.dispatch(DatabaseAction::SetModifiedTag(Some(id_clone)));
 
-                        second_db.dispatch(DatabaseAction::SetParentTag(second_db.db.tags.get_tags()[id_clone].get_parent()));
+                        second_db.dispatch(DatabaseAction::SetParentTag(second_db.db.tags.get_tags().get(&id_clone).unwrap().get_parent()));
                     })
                 };
                 if !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id) {
                     html!()
                 }
-                else if db_state.cursors.chosen_tag.is_some() && id == db_state.cursors.chosen_tag.unwrap() {
+                else if db_state.cursors.chosen_tag.is_some() && *id == db_state.cursors.chosen_tag.unwrap() {
                     html!(
 
                         <div><button onclick={callback} class="chat-option chosen-chat">{tag.get_name().clone()}</button></div>
@@ -952,19 +952,19 @@ pub fn app_page() -> Html {
                 }
             }).collect::<Html>();
 
-            let parent_tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+            let parent_tag_htmls = db_state.db.tags.get_tags().iter().map(|(id, tag)| {
                 let db_state = db_state.clone();
                 let callback = {
-                    let id_clone = id;
+                    let id_clone = *id;
                     let second_db = db_state.clone();
                     Callback::from(move |mouse_evt:MouseEvent| {
                         second_db.dispatch(DatabaseAction::SetParentTag(Some(id_clone)));
                     })
                 };
-                if (db_state.cursors.chosen_tag.is_some() && id == db_state.cursors.chosen_tag.unwrap()) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id)  {
+                if (db_state.cursors.chosen_tag.is_some() && *id == db_state.cursors.chosen_tag.unwrap()) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id)  {
                     html!()
                 }
-                else if db_state.cursors.chosen_parent_tag.is_some() && id == db_state.cursors.chosen_parent_tag.unwrap() {
+                else if db_state.cursors.chosen_parent_tag.is_some() && *id == db_state.cursors.chosen_parent_tag.unwrap() {
                     html!(
 
                         <div><button onclick={callback} class="chat-option chosen-chat">{tag.get_name().clone()}</button></div>
@@ -985,7 +985,7 @@ pub fn app_page() -> Html {
                 })
             };
 
-            let chosen_tag_by_id = db_state.db.tags.get_tags().get((db_state.cursors.chosen_tag.unwrap_or(1000000)));
+            let chosen_tag_by_id = db_state.db.tags.get_tags().get(&(db_state.cursors.chosen_tag.unwrap_or(1000000)));
 
             let tag_update_callback = {
                 let db_state = db_state.clone();
@@ -1007,7 +1007,7 @@ pub fn app_page() -> Html {
                     
                     match db_state.cursors.chosen_tag {
                         Some(tag_id) => {
-                            let mut tag = db_state.db.tags.get_tags()[tag_id].clone();
+                            let mut tag = db_state.db.tags.get_tags().get(&tag_id).unwrap().clone();
                             tag.name = tag_name;
                             tag.desc = description;
                             tag.parent = db_state.cursors.chosen_parent_tag;
@@ -1097,7 +1097,7 @@ pub fn app_page() -> Html {
                                 <h2>
                                     {
                                         match db_state.cursors.chosen_parent_tag {
-                                            Some(tag_id) => format!("Currently chosen parent tag : {}", db_state.db.tags.get_tags()[tag_id].get_name().clone()),
+                                            Some(tag_id) => format!("Currently chosen parent tag : {}", db_state.db.tags.get_tags().get(&tag_id).unwrap().get_name().clone()),
                                             None => "Does this tag have a parent ?".to_string()
                                         }
                                     }
@@ -1156,13 +1156,13 @@ pub fn app_page() -> Html {
                 }
             }).collect::<Html>();
 
-            let tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+            let tag_htmls = db_state.db.tags.get_tags().iter().map(|(id, tag)| {
                 let callback = {
 
                     let db_state = db_state.clone();
-                    let id_clone = id;
+                    let id_clone = *id;
                     Callback::from(move |mouse_evt:MouseEvent| {
-                        db_state.dispatch(DatabaseAction::AddToTagsForAM(id));
+                        db_state.dispatch(DatabaseAction::AddToTagsForAM(id_clone));
                     })
                 };
                 if db_state.cursors.chosen_access_mode_tags.contains(&id) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id) {
@@ -1175,12 +1175,12 @@ pub fn app_page() -> Html {
                 }
             }).collect::<Html>();
 
-            let chosen_tag_htmls = db_state.db.tags.get_tags().iter().enumerate().map(|(id, tag)| {
+            let chosen_tag_htmls = db_state.db.tags.get_tags().iter().map(|(id, tag)| {
                 let callback = {
                     let db_state = db_state.clone();
-                    let id_clone = id;
+                    let id_clone = *id;
                     Callback::from(move |mouse_evt:MouseEvent| {
-                        db_state.dispatch(DatabaseAction::RemoveFromTagsForAM(id));
+                        db_state.dispatch(DatabaseAction::RemoveFromTagsForAM(id_clone));
                     })
                 };
                 if !db_state.cursors.chosen_access_mode_tags.contains(&id) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id) {
@@ -1513,6 +1513,8 @@ pub fn app_page() -> Html {
                                 "Agent" => ChatSetting::Tool(ProximaTool::Agent, Some(ProximaToolData::Agent(
                                         AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
                                     ))),
+                                "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
+                                "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { access_mode_id: db_state.cursors.chosen_access_mode })),
                                 _ => panic!("Impossible")
                             },
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -1583,6 +1585,8 @@ pub fn app_page() -> Html {
                                         AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
                                     )))
                                 },
+                                "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
+                                "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { access_mode_id: db_state.cursors.chosen_access_mode })),
                                 _ => panic!("Impossible")
                             },
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -1653,6 +1657,8 @@ pub fn app_page() -> Html {
                                 "Agent" => ChatSetting::Tool(ProximaTool::Agent, Some(ProximaToolData::Agent(
                                         AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
                                     ))),
+                                "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
+                                "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { access_mode_id: db_state.cursors.chosen_access_mode })),
                                 _ => panic!("Impossible")
                             },
                             ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -1779,6 +1785,8 @@ pub fn app_page() -> Html {
                                                 "Web" => ProximaTool::Web,
                                                 "Python" => ProximaTool::Python,
                                                 "Agent" => ProximaTool::Agent,
+                                                "RNG" => ProximaTool::Rng,
+                                                "Memory" => ProximaTool::Memory,
                                                 _ => panic!("Should be impossible")
                                             };
                                             let mut allocatable = (*allocatable_agent_tools).clone();
@@ -1801,6 +1809,8 @@ pub fn app_page() -> Html {
                                                 <option value={"Web"}>{"Web"}</option>
                                                 <option value={"Python"}>{"Python"}</option>
                                                 <option value={"Agent"}>{"Agent"}</option>
+                                                <option value={"RNG"}>{"RNG"}</option>
+                                                <option value={"Memory"}>{"Memory"}</option>
                                             </select>
                                             <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={add_tool_callback}>{"Add"}</button>
                                             <div class="list-holder">
@@ -1824,6 +1834,8 @@ pub fn app_page() -> Html {
                                         <option value={"Web"}>{"Web"}</option>
                                         <option value={"Python"}>{"Python"}</option>
                                         <option value={"Agent"}>{"Agent"}</option>
+                                        <option value={"RNG"}>{"RNG"}</option>
+                                        <option value={"Memory"}>{"Memory"}</option>
                                     </select>
                                     {addition}
                                 </div>

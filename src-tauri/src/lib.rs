@@ -76,7 +76,7 @@ pub struct SecondArgument {
 #[tauri::command(async)]
 async fn ai_endpoint_post_request(state: tauri::State<'_,ProximaState>, app_state:tauri::AppHandle, request:AIPayload, second:SecondArgument) -> Result<AIResponse, ()> {
     match request.request.clone() {
-        EndpointRequestVariant::RespondToFullPrompt { whole_context, streaming, session_type, chat_settings } => if streaming {
+        EndpointRequestVariant::RespondToFullPrompt { whole_context, streaming, session_type, chat_settings, chat_id } => if streaming {
             let response = reqwest::Client::new()
                 .post(second.url)
                 .json(&request)
@@ -160,12 +160,14 @@ pub struct HttpAuthPostRequest {
 
 #[tauri::command(async)]
 async fn auth_post_request(state: tauri::State<'_,ProximaState>, request:AuthPayload, url:String) -> Result<AuthResponse, ()> {
+
+    println!("making request");
     let response = reqwest::Client::new()
         .post(url)
         .json(&request)
         .send()
         .await;
-    //println!("Received response");
+    println!("Received response");
     match response {
         Ok(data) => {
             //println!("Response is okayyy");
@@ -173,17 +175,24 @@ async fn auth_post_request(state: tauri::State<'_,ProximaState>, request:AuthPay
                 //println!("Response got JSON");
                 match data.json().await {
                     Ok(data) => {
-                        //println!("Rededed");
+                        println!("got response");
                         Ok(data)},
-                    Err(error) => Err(())
+                    Err(error) => {
+                        dbg!(error);
+                        Err(())
+                    }
                 }
             }
             else {
+                dbg!(data.status());
                 Err(())
             }
             
         },
-        Err(error) => Err(())
+        Err(error) => {
+            dbg!(error);
+            Err(())
+        }
     }
 }
 
