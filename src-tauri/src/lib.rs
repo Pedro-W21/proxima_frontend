@@ -11,10 +11,10 @@ use std::{
 };
 
 use openai::Credentials;
-use proxima_backend::{ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, database::{chats::ChatID, context::{ContextPart, ContextPosition}, DatabaseReplyVariant, DatabaseRequestVariant}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
+use proxima_backend::{ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, database::{ClientUpdate, DatabaseInfoRequest, DatabaseReplyVariant, DatabaseRequestVariant, chats::ChatID, context::{ContextPart, ContextPosition}}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
 use reqwest::Response;
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, async_runtime::spawn};
 use futures_util::StreamExt;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -71,6 +71,53 @@ pub struct HttpAIPostRequest {
 pub struct SecondArgument {
     url:String,
     chat_id:ChatID
+}
+
+#[tauri::command(async)]
+async fn notification_task(state: tauri::State<'_,ProximaState>, app_state:tauri::AppHandle, test:String, test2:String) -> Result<(), ()> {
+    println!("[backend] Starting streaming update task");
+    if !state.initialized.fetch_or(true, Ordering::Relaxed) {
+        println!("[backend] Starting streaming update task");
+        spawn(async move {
+            let response = reqwest::Client::new()
+                .post(test2)
+                .json(&DBPayload::new(test.clone(), DatabaseRequestVariant::Info(DatabaseInfoRequest::UnknownUpdates { access_key: test })))
+                .send()
+                .await;
+
+            match response {
+                Ok(data) => {
+                    let mut stream = data.bytes_stream();
+                    let mut token_id:u64 = 0;
+                    while let Some(item) = stream.next().await {
+                        match item {
+                            Ok(bytes) => {
+                                let u8s:Vec<u8> = bytes.to_vec();
+                                let string = String::from_utf8_lossy_owned(u8s);
+                                if let Ok(request_variant) = serde_json::from_str::<ClientUpdate>(&string) {
+                                    println!("[backend] emitting client update {token_id}");
+                                    app_state.emit("client-update", (request_variant.clone(), token_id)).unwrap();
+                                    token_id += 1;
+                                }
+                                else {
+                                    dbg!("Getting invalid events : ", string);
+                                }
+                                
+                            },
+                            Err(error) => {
+
+                            },
+                        }
+                    }
+                },
+                Err(error) => ()
+            }
+        });
+        Ok(())
+    }
+    else {
+        Err(())
+    }
 }
 
 #[tauri::command(async)]
@@ -198,9 +245,8 @@ async fn auth_post_request(state: tauri::State<'_,ProximaState>, request:AuthPay
 
 #[tauri::command]
 fn print_to_console(state: tauri::State<ProximaState>, value: String) {
-    println!("PRINTING {}", value);
+    println!("[frontend] {}", value);
 }
-
 pub struct ProximaState {
     initialized: AtomicBool,
     user_loaded: AtomicBool,
@@ -230,7 +276,8 @@ pub fn run() {
             print_to_console,
             ai_endpoint_post_request,
             database_post_request,
-            auth_post_request
+            auth_post_request,
+            notification_task
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, path::PathBuf, thread, time::Duration};
+use std::{collections::{HashMap, HashSet}, path::PathBuf, thread, time::Duration, u64};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use gloo_events::EventListener;
@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use yew::{html::ChildrenProps, platform::pinned::mpsc::UnboundedSender, prelude::*, virtual_dom::VNode};
 use gloo_utils::format::JsValueSerdeExt;
-use proxima_backend::{ai_interaction::{endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, tools::{AgentToolData, ProximaTool, ProximaToolData, Tools}}, database::{DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase, access_modes::AccessMode, chats::{Chat, ChatID, SessionType}, configuration::{ChatConfiguration, ChatSetting, RepeatPosition}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
+use proxima_backend::{ai_interaction::{endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, tools::{AgentToolData, ProximaTool, ProximaToolData, Tools}}, database::{ClientUpdate, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ProxDatabase, access_modes::AccessMode, chats::{Chat, ChatID, SessionType}, configuration::{ChatConfiguration, ChatSetting, RepeatPosition}, context::{ContextData, ContextPart, ContextPosition, WholeContext}, description::Description, devices::DeviceID, tags::{NewTag, Tag, TagID}}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
 use yew::prelude::*;
 use selectrs::yew::{Select, Group};
 use markdown::to_html;
@@ -39,6 +39,11 @@ pub struct HttpAuthPostRequest {
     url:String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct NotificationRequest {
+    test:String,
+    test2:String
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct HttpDBPostRequest {
@@ -119,9 +124,17 @@ pub fn initialize_page() -> Html {
                 }
 
                 let value = value;
-
+                let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("Got a response from the server")}).unwrap();
+                invoke("print_to_console", args).await;
                 match value {
                     Ok(response) => {
+                        let args2: JsValue = serde_wasm_bindgen::to_value(&NotificationRequest {test:response.session_token.clone(), test2:local_ai_url.clone() + "/db"}).unwrap();
+                        invoke("notification_task", args2).await;
+
+
+                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("Started notification task")}).unwrap();
+                        invoke("print_to_console", args).await;
+
                         second_clone.dispatch(ProximaStateAction::ChangeAuthToken(response.session_token.clone()));
                         second_clone.dispatch(ProximaStateAction::ChangeDeviceID(response.device_id));
                         second_clone.dispatch(ProximaStateAction::ChangeUsername(pseudonym.clone().trim().to_string()));
@@ -224,7 +237,8 @@ pub struct DatabaseState {
     pub db:ProxDatabase,
     pub cursors:UserCursors,
     pub update_flipper:bool,
-    pub token_streams:HashMap<ChatID, StreamingData>
+    pub token_streams:HashMap<ChatID, StreamingData>,
+    pub received_updates:HashSet<u64>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -242,6 +256,7 @@ impl Default for DatabaseState {
             cursors:UserCursors::zero(),
             update_flipper:false,
             token_streams:HashMap::with_capacity(16),
+            received_updates:HashSet::with_capacity(128)
         }
     }
 }
@@ -273,6 +288,10 @@ pub enum DatabaseAction {
         chat_id:ChatID,
         token_id:u64,
         data:ContextData
+    },
+    ApplyClientUpdate {
+        update:ClientUpdate,
+        event_id:u64
     }
 }
 
@@ -283,6 +302,7 @@ impl Reducible for DatabaseState {
         let mut cursors = self.cursors.clone();
         let mut update_flipper = self.update_flipper;
         let mut token_streams = self.token_streams.clone();
+        let mut received_updates = self.received_updates.clone();
         let now = Utc::now();
         let mut to_remove = Vec::with_capacity(2);
         for (chat_id, stream) in &mut token_streams {
@@ -312,8 +332,29 @@ impl Reducible for DatabaseState {
                 );
                 cursors = new_cursors;
             },
-            DatabaseAction::RemoveItem(item_id) => {
-                database.remove_request(item_id);
+            DatabaseAction::RemoveItem(rem) => {
+                database.remove_request(rem);
+            }
+            DatabaseAction::ApplyClientUpdate { update, event_id } => {
+                if received_updates.insert(event_id) {
+                    match update {
+                        ClientUpdate::ItemRemoval(rem) => {
+                            database.remove_request(rem);
+                        },
+                        ClientUpdate::ItemUpdate(item_id, item) => {
+                            cursors = apply_server_updates(&mut database, vec![(item_id, item)], cursors);
+                        }
+                    }
+                    if received_updates.len() > 60 {
+                        let mut smallest = u64::MAX;
+                        for update in &received_updates {
+                            if *update < smallest {
+                                smallest = *update;
+                            }
+                        }
+                        received_updates.remove(&smallest);
+                    }
+                }
             }
             DatabaseAction::SetChat(chat) => cursors.chosen_chat = chat,
             DatabaseAction::SetTab(tab) => cursors.chosen_tab = tab,
@@ -380,7 +421,7 @@ impl Reducible for DatabaseState {
             }
 
         }
-        DatabaseState{db:database, cursors, update_flipper, token_streams}.into()
+        DatabaseState{db:database, cursors, update_flipper, token_streams, received_updates}.into()
     }
 }
 
@@ -414,7 +455,7 @@ pub fn app_page() -> Html {
     let second_db = db_state.clone();
 
     use_effect_with(
-        second_db.clone(),
+        (),
         {
             let div_node_ref = event_div_node_ref.clone();
             let second_db = second_db.clone();
@@ -435,7 +476,7 @@ pub fn app_page() -> Html {
                         let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("STARTED LISTENING")}).unwrap();
                         invoke("print_to_console", args).await;
                         let (mut listener, mut abort_handle) = futures::stream::abortable(listener);
-                        if let Some(raw_event) = listener.next().await {
+                        while let Some(raw_event) = listener.next().await {
 
                             
                             let event = raw_event.payload.0;
@@ -444,12 +485,6 @@ pub fn app_page() -> Html {
 
                             let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S FOR CHAT_ID {chat_id} | CHAT LEN {} | EVENT ID {}", db_state.db.chats.get_chats().len(), raw_event.id)}).unwrap();
                             invoke("print_to_console", args).await;
-
-                            //let chat = db_state.db.chats.get_chats().get(&chat_id).unwrap().clone();
-
-
-                            //let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("CHAT PARTS LEN {} | LAST CHAT PART LEN {:?}", chat.context.get_parts().len(), chat.context.get_parts().last().map(|val| {val.get_data().len()}))}).unwrap();
-                            //invoke("print_to_console", args).await;
 
                             match event {
                                 EndpointResponseVariant::StartStream(data, position) => {
@@ -504,18 +539,58 @@ pub fn app_page() -> Html {
             }
         }
     );
-    
-    
-    /*let database_data = use_state_eq(|| SharedProximaData::new());
-    {  
-        let database_data_setter = database_data.clone();
-        use_effect(move || {
-            spawn_local(async move {
-                let args = serde_wasm_bindgen::to_value(&EmptyArgs{}).unwrap();
-                database_data_setter.set(invoke("get_database_copy", args).await.into_serde().unwrap());
-            });
-        });
-    }*/
+
+    use_effect_with(
+        (),
+        {
+            let div_node_ref = event_div_node_ref.clone();
+            let second_db = second_db.clone();
+            let proxima_state = proxima_state.clone();
+            move |_| {
+                let mut custard_listener = None;
+
+                let db_state = second_db.clone();
+                let proxima_state = proxima_state.clone();
+                if let Some(element) = div_node_ref.cast::<HtmlElement>() {
+                    // Create your Callback as you normally would
+                    let oncustard = Callback::from(move |e: Event| {
+                        
+                    });
+                    spawn_local(async move {
+                        let mut listener = tauri_sys::event::listen::<(ClientUpdate, u64)>("client-update").await.unwrap();
+
+                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("STARTED LISTENING FOR UPDATES")}).unwrap();
+                        invoke("print_to_console", args).await;
+                        let (mut listener, mut abort_handle) = futures::stream::abortable(listener);
+                        while let Some(raw_event) = listener.next().await {
+                            let event = raw_event.payload.0;
+                            let event_id = raw_event.payload.1;
+
+                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S FOR CHAT_ID {event_id} | EVENT ID {}", raw_event.id)}).unwrap();
+                            invoke("print_to_console", args).await;
+
+                            db_state.dispatch(DatabaseAction::ApplyClientUpdate { update: event, event_id });
+
+                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("FINISHED EVENT YAHOOO")}).unwrap();
+                            invoke("print_to_console", args).await;
+                        }
+                    });
+                    // Create a Closure from a Box<dyn Fn> - this has to be 'static
+                    let listener = EventListener::new(
+                        &element,
+                        "client-update",
+                        move |e| {
+                        
+                        }
+                    );
+
+                    custard_listener = Some(listener);
+                }
+
+                move || drop(custard_listener)
+            }
+        }
+    );
 
     let mut values = Vec::with_capacity(4);
     for i in 0..8 {
@@ -534,15 +609,6 @@ pub fn app_page() -> Html {
             
         })
     }).collect();
-
-    let selected_value = use_state(|| "Option1".to_string());
-
-    let pseudo_node_ref = use_node_ref();
-    let prompt_node_ref = use_node_ref();
-    let tag_desc_ref = use_node_ref();
-    let tag_name_ref = use_node_ref();
-    let am_name_ref = use_node_ref();
-    let cc_select_ref = use_node_ref();
     let second_db_here = db_state.clone();
     let current_app = match db_state.cursors.chosen_tab {
         /*Home*/ 0 => {
@@ -580,7 +646,7 @@ pub fn app_page() -> Html {
             )
         },
         /*Files*/ 4 => html!(),
-        /*Chat Settings*/ 5 => {
+        /*Chat Configurations */ 5 => {
             let db_state = db_state.clone();
             html!(
                 <ContextProvider<UseReducerHandle<DatabaseState>> context={db_state}>
@@ -760,8 +826,7 @@ pub fn app() -> Html {
         
         return html!{
             <ContextProvider<UseReducerHandle<ProximaState>> context={proxima_state.clone()}>
-            // Every child here and their children will have access to this context.
-                <Initialize />
+                <Initialize/>
             </ContextProvider<UseReducerHandle<ProximaState>>>
             
         }
@@ -769,15 +834,14 @@ pub fn app() -> Html {
     else if !(*proxima_state).loaded {
         return html!{
             <ContextProvider<UseReducerHandle<ProximaState>> context={proxima_state.clone()}>
-            // Every child here and their children will have access to this context.
-                <Loading />
+                <Loading/>
             </ContextProvider<UseReducerHandle<ProximaState>>>
         }
     }
     else {
         return html!(
             <ContextProvider<UseReducerHandle<ProximaState>> context={proxima_state.clone()}>
-            <MainPage/>
+                <MainPage/>
             </ContextProvider<UseReducerHandle<ProximaState>>>)
     }
 
