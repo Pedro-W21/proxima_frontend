@@ -24,6 +24,7 @@
         }
       ]
     },
-    "http:default"
+    "http:default",
+    "notification:default"
   ]
 }

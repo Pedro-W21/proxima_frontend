@@ -15,7 +15,7 @@ use markdown::to_html;
 use web_sys::{EventTarget, HtmlElement};
 use futures::StreamExt;
 
-use crate::{db_sync::{UserCursors, apply_server_updates, get_delta_for_add, get_next_id_for_category, handle_add, handle_add_reducible}, tabs::{access_modes_tab::AccessModesTab, chat_configs_tab::ChatConfigsTab, chat_tab::ChatTab, home_tab::HomeTab, notification_tab::NotificationTab, tags_tab::TagsTab}};
+use crate::{db_sync::{UserCursors, apply_server_updates, get_delta_for_add, get_next_id_for_category, handle_add, handle_add_reducible}, tabs::{access_modes_tab::AccessModesTab, chat_configs_tab::ChatConfigsTab, chat_tab::ChatTab, home_tab::HomeTab, notification_tab::{NotificationTab, generate_title_and_desc_for}, tags_tab::TagsTab}};
 
 #[wasm_bindgen]
 extern "C" {
@@ -40,7 +40,7 @@ pub struct HttpAuthPostRequest {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct NotificationRequest {
+pub struct StreamingUpdateRequest {
     test:String,
     test2:String
 }
@@ -55,6 +55,12 @@ pub struct HttpDBPostRequest {
 pub struct HttpAIPostRequest {
     request:AIPayload,
     second:SecondArgument
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SystemNotificationRequest {
+    pub title:String,
+    pub description:String
 }
 
 #[derive(Serialize, Deserialize)]
@@ -128,8 +134,8 @@ pub fn initialize_page() -> Html {
                 invoke("print_to_console", args).await;
                 match value {
                     Ok(response) => {
-                        let args2: JsValue = serde_wasm_bindgen::to_value(&NotificationRequest {test:response.session_token.clone(), test2:local_ai_url.clone() + "/db"}).unwrap();
-                        invoke("notification_task", args2).await;
+                        let args2: JsValue = serde_wasm_bindgen::to_value(&StreamingUpdateRequest {test:response.session_token.clone(), test2:local_ai_url.clone() + "/db"}).unwrap();
+                        invoke("streaming_update_task", args2).await;
 
 
                         let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("Started notification task")}).unwrap();
@@ -565,10 +571,14 @@ pub fn app_page() -> Html {
                         while let Some(raw_event) = listener.next().await {
                             let event = raw_event.payload.0;
                             let event_id = raw_event.payload.1;
-
-                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S FOR CHAT_ID {event_id} | EVENT ID {}", raw_event.id)}).unwrap();
-                            invoke("print_to_console", args).await;
-
+                            match event.clone() {
+                                ClientUpdate::ItemUpdate(DatabaseItemID::Notification(notif_id), DatabaseItem::Notification(notif)) => {
+                                    let (title, description) = generate_title_and_desc_for(notif);
+                                    let args = serde_wasm_bindgen::to_value(&SystemNotificationRequest {title, description}).unwrap();
+                                    invoke("show_notification", args).await;
+                                },
+                                _ => ()
+                            }
                             db_state.dispatch(DatabaseAction::ApplyClientUpdate { update: event, event_id });
 
                             let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("FINISHED EVENT YAHOOO")}).unwrap();

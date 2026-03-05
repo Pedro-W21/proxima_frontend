@@ -105,3 +105,16 @@ pub fn single_notification() -> Html {
         </div>
     )
 }
+
+pub fn generate_title_and_desc_for(notif:Notification) -> (String, String) {
+    match notif.related_item {
+        Some(id) => match id {
+            DatabaseItemID::Chat(chat_id) => {
+                (format!("Proxima chat update"), format!("Proxima has finished generating a response for chat {}", chat_id))
+            }
+            _ => (format!("Proxima"), notif.text.unwrap_or(format!("Unsupported notification")))
+        }
+        None => (format!("Proxima"), notif.text.unwrap_or(format!("Unknown notification")))
+        
+    }   
+}

@@ -29,4 +29,5 @@ tauri-plugin-http = "2"
 reqwest = { version = "0.12", features = ["json", "blocking", "stream"] }
 reqwest-streams = "0.10.0"
 futures-util = "0.3.31"
+tauri-plugin-notification = "2"
 

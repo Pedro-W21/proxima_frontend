@@ -10,12 +10,21 @@ use std::{
     },
 };
 
+use futures_util::StreamExt;
 use openai::Credentials;
-use proxima_backend::{ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant}, database::{ClientUpdate, DatabaseInfoRequest, DatabaseReplyVariant, DatabaseRequestVariant, chats::ChatID, context::{ContextPart, ContextPosition}}, web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse}};
+use proxima_backend::{
+    ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant},
+    database::{
+        chats::ChatID,
+        context::{ContextPart, ContextPosition},
+        ClientUpdate, DatabaseInfoRequest, DatabaseReplyVariant, DatabaseRequestVariant,
+    },
+    web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse},
+};
 use reqwest::Response;
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager, async_runtime::spawn};
-use futures_util::StreamExt;
+use tauri::{async_runtime::spawn, Emitter, Manager};
+use tauri_plugin_notification::NotificationExt;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -30,7 +39,6 @@ pub struct InitializeInnerArgs {
     proxima_path: PathBuf,
 }
 
-
 #[tauri::command]
 fn initialize(state: tauri::State<ProximaState>, inner: InitializeInnerArgs) -> bool {
     state.initialized.store(true, Ordering::Relaxed);
@@ -39,181 +47,206 @@ fn initialize(state: tauri::State<ProximaState>, inner: InitializeInnerArgs) -> 
 
 #[derive(Serialize, Deserialize)]
 pub struct HttpDBPostRequest {
-    request:DBPayload,
-    url:String,
+    request: DBPayload,
+    url: String,
 }
 
 #[tauri::command(async)]
-async fn database_post_request(state: tauri::State<'_,ProximaState>, request:DBPayload, url:String) -> Result<DBResponse, ()> {
+async fn database_post_request(
+    state: tauri::State<'_, ProximaState>,
+    request: DBPayload,
+    url: String,
+) -> Result<DBResponse, ()> {
     let response = reqwest::Client::new()
         .post(url.clone())
         .json(&request)
         .send()
         .await;
     match response {
-        Ok(data) => {
-            match data.json().await {
-                Ok(data) => Ok(data),
-                Err(error) => Err(())
-            }
+        Ok(data) => match data.json().await {
+            Ok(data) => Ok(data),
+            Err(error) => Err(()),
         },
-        Err(error) => Err(())
+        Err(error) => Err(()),
     }
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct HttpAIPostRequest {
-    request:AIPayload,
-    url:String,
-    chat_id:ChatID
+    request: AIPayload,
+    url: String,
+    chat_id: ChatID,
 }
 #[derive(Serialize, Deserialize)]
 pub struct SecondArgument {
-    url:String,
-    chat_id:ChatID
+    url: String,
+    chat_id: ChatID,
 }
 
 #[tauri::command(async)]
-async fn notification_task(state: tauri::State<'_,ProximaState>, app_state:tauri::AppHandle, test:String, test2:String) -> Result<(), ()> {
+async fn streaming_update_task(
+    state: tauri::State<'_, ProximaState>,
+    app_state: tauri::AppHandle,
+    test: String,
+    test2: String,
+) -> Result<(), ()> {
     println!("[backend] Starting streaming update task");
     if !state.initialized.fetch_or(true, Ordering::Relaxed) {
         println!("[backend] Starting streaming update task");
         spawn(async move {
             let response = reqwest::Client::new()
                 .post(test2)
-                .json(&DBPayload::new(test.clone(), DatabaseRequestVariant::Info(DatabaseInfoRequest::UnknownUpdates { access_key: test })))
+                .json(&DBPayload::new(
+                    test.clone(),
+                    DatabaseRequestVariant::Info(DatabaseInfoRequest::UnknownUpdates {
+                        access_key: test,
+                    }),
+                ))
                 .send()
                 .await;
 
             match response {
                 Ok(data) => {
                     let mut stream = data.bytes_stream();
-                    let mut token_id:u64 = 0;
+                    let mut token_id: u64 = 0;
                     while let Some(item) = stream.next().await {
                         match item {
                             Ok(bytes) => {
-                                let u8s:Vec<u8> = bytes.to_vec();
+                                let u8s: Vec<u8> = bytes.to_vec();
                                 let string = String::from_utf8_lossy_owned(u8s);
-                                if let Ok(request_variant) = serde_json::from_str::<ClientUpdate>(&string) {
+                                if let Ok(request_variant) =
+                                    serde_json::from_str::<ClientUpdate>(&string)
+                                {
                                     println!("[backend] emitting client update {token_id}");
-                                    app_state.emit("client-update", (request_variant.clone(), token_id)).unwrap();
+                                    app_state
+                                        .emit("client-update", (request_variant.clone(), token_id))
+                                        .unwrap();
                                     token_id += 1;
-                                }
-                                else {
+                                } else {
                                     dbg!("Getting invalid events : ", string);
                                 }
-                                
-                            },
-                            Err(error) => {
-
-                            },
+                            }
+                            Err(error) => {}
                         }
                     }
-                },
-                Err(error) => ()
+                }
+                Err(error) => (),
             }
         });
         Ok(())
-    }
-    else {
+    } else {
         Err(())
     }
 }
 
 #[tauri::command(async)]
-async fn ai_endpoint_post_request(state: tauri::State<'_,ProximaState>, app_state:tauri::AppHandle, request:AIPayload, second:SecondArgument) -> Result<AIResponse, ()> {
+async fn ai_endpoint_post_request(
+    state: tauri::State<'_, ProximaState>,
+    app_state: tauri::AppHandle,
+    request: AIPayload,
+    second: SecondArgument,
+) -> Result<AIResponse, ()> {
     match request.request.clone() {
-        EndpointRequestVariant::RespondToFullPrompt { whole_context, streaming, session_type, chat_settings, chat_id, access_mode } => if streaming {
-            let response = reqwest::Client::new()
-                .post(second.url)
-                .json(&request)
-                .send()
-                .await;
+        EndpointRequestVariant::RespondToFullPrompt {
+            whole_context,
+            streaming,
+            session_type,
+            chat_settings,
+            chat_id,
+            access_mode,
+        } => {
+            if streaming {
+                let response = reqwest::Client::new()
+                    .post(second.url)
+                    .json(&request)
+                    .send()
+                    .await;
 
-            match response {
-                Ok(data) => {
-                    let mut stream = data.bytes_stream();
-                    let mut total = whole_context.clone();
-                    let mut current_part = ContextPart::new(vec![], ContextPosition::AI);
-                    let mut token_id:u64 = 0;
-                    while let Some(item) = stream.next().await {
-                        match item {
-                            Ok(bytes) => {
-                                let u8s:Vec<u8> = bytes.to_vec();
-                                let string = String::from_utf8_lossy_owned(u8s);
-                                if let Ok(request_variant) = serde_json::from_str::<EndpointResponseVariant>(&string) {
-                                    app_state.emit("chat-token", (request_variant.clone(), second.chat_id, token_id)).unwrap();
-                                    token_id += 1;
-                                    match request_variant {
-                                        EndpointResponseVariant::StartStream(data, pos) | EndpointResponseVariant::ContinueStream(data, pos) => {
-
-                                            println!("[backend] emitting chat-token event for chat {} ! event : {}", second.chat_id, data.get_text());
-                                            if pos == *current_part.get_position() {
-                                                current_part.add_data(data);
+                match response {
+                    Ok(data) => {
+                        let mut stream = data.bytes_stream();
+                        let mut total = whole_context.clone();
+                        let mut current_part = ContextPart::new(vec![], ContextPosition::AI);
+                        let mut token_id: u64 = 0;
+                        while let Some(item) = stream.next().await {
+                            match item {
+                                Ok(bytes) => {
+                                    let u8s: Vec<u8> = bytes.to_vec();
+                                    let string = String::from_utf8_lossy_owned(u8s);
+                                    if let Ok(request_variant) =
+                                        serde_json::from_str::<EndpointResponseVariant>(&string)
+                                    {
+                                        app_state
+                                            .emit(
+                                                "chat-token",
+                                                (request_variant.clone(), second.chat_id, token_id),
+                                            )
+                                            .unwrap();
+                                        token_id += 1;
+                                        match request_variant {
+                                            EndpointResponseVariant::StartStream(data, pos)
+                                            | EndpointResponseVariant::ContinueStream(data, pos) => {
+                                                println!("[backend] emitting chat-token event for chat {} ! event : {}", second.chat_id, data.get_text());
+                                                if pos == *current_part.get_position() {
+                                                    current_part.add_data(data);
+                                                } else {
+                                                    current_part.concatenate_text();
+                                                    total.add_part(current_part.clone());
+                                                    current_part =
+                                                        ContextPart::new(vec![data], pos);
+                                                }
                                             }
-                                            else {
-                                                current_part.concatenate_text();
-                                                total.add_part(current_part.clone());
-                                                current_part = ContextPart::new(vec![data], pos);
-                                            }
-                                        },
-                                        _ => ()
+                                            _ => (),
+                                        }
+                                    } else {
+                                        dbg!("Getting invalid events : ", string);
                                     }
                                 }
-                                else {
-                                    dbg!("Getting invalid events : ", string);
-                                }
-                                
-                            },
-                            Err(error) => {
-
-                            },
+                                Err(error) => {}
+                            }
                         }
+                        current_part.concatenate_text();
+                        total.add_part(current_part);
+                        Ok(AIResponse {
+                            reply: EndpointResponseVariant::MultiTurnBlock(total),
+                        })
                     }
-                    current_part.concatenate_text();
-                    total.add_part(current_part);
-                    Ok(AIResponse { reply: EndpointResponseVariant::MultiTurnBlock(total) })
-                },
-                Err(error) => Err(())
+                    Err(error) => Err(()),
+                }
+            } else {
+                let response = reqwest::Client::new()
+                    .post(second.url)
+                    .json(&request)
+                    .send()
+                    .await;
+
+                match response {
+                    Ok(data) => match data.json().await {
+                        Ok(data) => Ok(data),
+                        Err(error) => Err(()),
+                    },
+                    Err(error) => Err(()),
+                }
             }
         }
-        else {
-            let response = reqwest::Client::new()
-                .post(second.url)
-                .json(&request)
-                .send()
-                .await;
-
-            match response {
-                Ok(data) => {
-                    match data.json().await {
-                        Ok(data) => {Ok(data)},
-                        Err(error) => Err(())
-                    }
-                },
-                Err(error) => Err(())
-            }
-        },
         EndpointRequestVariant::Continue => Err(()),
     }
-    
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct HttpAuthPostRequest {
-    request:AuthPayload,
-    url:String,
+    request: AuthPayload,
+    url: String,
 }
 
 #[tauri::command(async)]
-async fn auth_post_request(state: tauri::State<'_,ProximaState>, request:AuthPayload, url:String) -> Result<AuthResponse, ()> {
-
+async fn auth_post_request(
+    state: tauri::State<'_, ProximaState>,
+    request: AuthPayload,
+    url: String,
+) -> Result<AuthResponse, ()> {
     println!("making request");
-    let response = reqwest::Client::new()
-        .post(url)
-        .json(&request)
-        .send()
-        .await;
+    let response = reqwest::Client::new().post(url).json(&request).send().await;
     println!("Received response");
     match response {
         Ok(data) => {
@@ -223,24 +256,37 @@ async fn auth_post_request(state: tauri::State<'_,ProximaState>, request:AuthPay
                 match data.json().await {
                     Ok(data) => {
                         println!("got response");
-                        Ok(data)},
+                        Ok(data)
+                    }
                     Err(error) => {
                         dbg!(error);
                         Err(())
                     }
                 }
-            }
-            else {
+            } else {
                 dbg!(data.status());
                 Err(())
             }
-            
-        },
+        }
         Err(error) => {
             dbg!(error);
             Err(())
         }
     }
+}
+
+#[tauri::command(async)]
+async fn show_notification(
+    state: tauri::State<'_, ProximaState>,
+    app_state: tauri::AppHandle,
+    title: String,
+    description: String,
+) -> Result<(), ()> {
+    println!("[backend] creating notification");
+    app_state.notification().builder().title(title).body(description).show().map_err(|err| {
+    println!("[backend] notification creation error : {err}");()})?;
+    println!("[backend] notification send");
+    Ok(())
 }
 
 #[tauri::command]
@@ -258,6 +304,7 @@ pub struct ProximaState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -277,7 +324,8 @@ pub fn run() {
             ai_endpoint_post_request,
             database_post_request,
             auth_post_request,
-            notification_task
+            streaming_update_task,
+            show_notification
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
