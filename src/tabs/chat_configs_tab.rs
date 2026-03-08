@@ -138,6 +138,9 @@ pub fn chat_configs_tab() -> Html {
             db_state.dispatch(DatabaseAction::SetConfigSettingID(None));
             db_state.dispatch(DatabaseAction::SetCurrentSetting(match selected_setting_string.trim() {
                 "Temperature" => Some(ChatSetting::Temperature(70)),
+                "TopP" => Some(ChatSetting::TopP(100)),
+                "Presence penalty" => Some(ChatSetting::PresencePenalty(0)),
+                "Repeat penalty" => Some(ChatSetting::RepeatPenalty(100)),
                 "System prompt" => Some(ChatSetting::SystemPrompt(ContextPart::new(vec![], ContextPosition::System))),
                 "Initial Pre-prompt" => Some(ChatSetting::PrePrompt(ContextPart::new(vec![], ContextPosition::User))),
                 "Repeated Pre-prompt" => Some(ChatSetting::RepeatedPrePrompt(ContextPart::new(vec![], ContextPosition::User), RepeatPosition::AfterLatest)),
@@ -185,6 +188,9 @@ pub fn chat_configs_tab() -> Html {
                         }
                     ),
                     ChatSetting::Temperature(temp) => ChatSetting::Temperature(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                    ChatSetting::PresencePenalty(temp) => ChatSetting::PresencePenalty(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                    ChatSetting::RepeatPenalty(temp) => ChatSetting::RepeatPenalty(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                    ChatSetting::TopP(temp) => ChatSetting::TopP(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                     ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
                         ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
                         ], ContextPosition::System)),
@@ -215,7 +221,8 @@ pub fn chat_configs_tab() -> Html {
                             },
                             None => panic!("What")
                         }
-                    }
+                    },
+                    _ => panic!("Setting doesn't exist in UI")
                 },
                 None => {
                     panic!("Impossible, the button should only exist if this is Some(...)")
@@ -256,6 +263,9 @@ pub fn chat_configs_tab() -> Html {
                         }
                     ),
                     ChatSetting::Temperature(temp) => ChatSetting::Temperature(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                    ChatSetting::PresencePenalty(temp) => ChatSetting::PresencePenalty(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                    ChatSetting::RepeatPenalty(temp) => ChatSetting::RepeatPenalty(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                    ChatSetting::TopP(temp) => ChatSetting::TopP(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                     ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
                         ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
                         ], ContextPosition::System)),
@@ -288,7 +298,8 @@ pub fn chat_configs_tab() -> Html {
                             },
                             None => panic!("What")
                         }
-                    }
+                    },
+                    _ => panic!("Setting doesn't exist in UI")
                 },
                 None => {
                     panic!("Impossible, the button should only exist if this is Some(...)")
@@ -331,6 +342,9 @@ pub fn chat_configs_tab() -> Html {
                         }
                     ),
                     ChatSetting::Temperature(temp) => ChatSetting::Temperature(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                    ChatSetting::PresencePenalty(temp) => ChatSetting::PresencePenalty(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                    ChatSetting::RepeatPenalty(temp) => ChatSetting::RepeatPenalty(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
+                    ChatSetting::TopP(temp) => ChatSetting::TopP(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
                     ChatSetting::SystemPrompt(prompt) => ChatSetting::SystemPrompt(ContextPart::new(vec![
                         ContextData::Text(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value())
                         ], ContextPosition::System)),
@@ -361,7 +375,8 @@ pub fn chat_configs_tab() -> Html {
                             },
                             None => panic!("What")
                         }
-                    }
+                    },
+                    _ => panic!("Setting doesn't exist in UI")
                 },
                 None => {
                     panic!("Impossible, the button should only exist if this is Some(...)")
@@ -443,6 +458,24 @@ pub fn chat_configs_tab() -> Html {
                 ChatSetting::Temperature(temp) => html!(
                     <div class="label-input-combo second-level standard-padding-margin-corners">
                         <p>{format!("Temperature : {}", temp as f64/100.0)}</p>
+                        <input class="standard-padding-margin-corners" onclick={on_click_callback} onchange={on_change_callback} type="range" id="temp_slider" min="0" max="200" step="1" ref={cc_setting_value_ref} />
+                    </div>
+                ),
+                ChatSetting::RepeatPenalty(temp) => html!(
+                    <div class="label-input-combo second-level standard-padding-margin-corners">
+                        <p>{format!("Repeat penalty : {}", temp as f64/100.0)}</p>
+                        <input class="standard-padding-margin-corners" onclick={on_click_callback} onchange={on_change_callback} type="range" id="temp_slider" min="0" max="200" step="1" ref={cc_setting_value_ref} />
+                    </div>
+                ),
+                ChatSetting::PresencePenalty(temp) => html!(
+                    <div class="label-input-combo second-level standard-padding-margin-corners">
+                        <p>{format!("Presence penalty : {}", temp as f64/100.0)}</p>
+                        <input class="standard-padding-margin-corners" onclick={on_click_callback} onchange={on_change_callback} type="range" id="temp_slider" min="0" max="200" step="1" ref={cc_setting_value_ref} />
+                    </div>
+                ),
+                ChatSetting::TopP(temp) => html!(
+                    <div class="label-input-combo second-level standard-padding-margin-corners">
+                        <p>{format!("Top P : {}", temp as f64/100.0)}</p>
                         <input class="standard-padding-margin-corners" onclick={on_click_callback} onchange={on_change_callback} type="range" id="temp_slider" min="0" max="200" step="1" ref={cc_setting_value_ref} />
                     </div>
                 ),
@@ -558,6 +591,7 @@ pub fn chat_configs_tab() -> Html {
                         </div>
                     )
                 }
+                _ => html!({"unsupported access mode"})
             },
             None => {
                 html!({"Choose a setting to add or modify to configure its attribute(s)"})
@@ -603,6 +637,9 @@ pub fn chat_configs_tab() -> Html {
                         </h2>
                         <select class="most-horizontal-space-no-flex standard-padding-margin-corners" ref={cc_setting_ref} onchange={select_settings_callback}>
                             <option value={"Temperature"}>{"Temperature"}</option>
+                            <option value={"TopP"}>{"Top P"}</option>
+                            <option value={"Presence penalty"}>{"Presence penalty"}</option>
+                            <option value={"Repeat penalty"}>{"Repeat penalty"}</option>
                             <option value={"System prompt"}>{"System prompt"}</option>
                             <option value={"Initial Pre-prompt"}>{"Initial Pre-prompt"}</option>
                             <option value={"Repeated Pre-prompt"}>{"Repeated Pre-prompt"}</option>
