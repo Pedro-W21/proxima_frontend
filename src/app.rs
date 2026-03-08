@@ -345,9 +345,11 @@ impl Reducible for DatabaseState {
                 if received_updates.insert(event_id) {
                     match update {
                         ClientUpdate::ItemRemoval(rem) => {
+                            mark_updated(&mut cursors, rem);
                             database.remove_request(rem);
                         },
                         ClientUpdate::ItemUpdate(item_id, item) => {
+                            mark_updated(&mut cursors, item_id);
                             cursors = apply_server_updates(&mut database, vec![(item_id, item)], cursors);
                         }
                     }
@@ -363,7 +365,7 @@ impl Reducible for DatabaseState {
                 }
             }
             DatabaseAction::SetChat(chat) => cursors.chosen_chat = chat,
-            DatabaseAction::SetTab(tab) => cursors.chosen_tab = tab,
+            DatabaseAction::SetTab(tab) => {cursors.chosen_tab = tab; cursors.anything_new_for[tab] = false;},
             DatabaseAction::SetGlobalAM(am) => cursors.chosen_access_mode = am,
             DatabaseAction::SetModifiedAM(am) => cursors.access_mode_for_modification = am,
             DatabaseAction::SetModifiedTag(tag) => cursors.chosen_tag = tag,
@@ -428,6 +430,22 @@ impl Reducible for DatabaseState {
 
         }
         DatabaseState{db:database, cursors, update_flipper, token_streams, received_updates}.into()
+    }
+}
+
+fn mark_updated(cursors:&mut UserCursors, db_id:DatabaseItemID) {
+    let index = match db_id {
+        DatabaseItemID::Chat(_) => 1,
+        DatabaseItemID::Tag(_) => 2,
+        DatabaseItemID::File(_) => 4,
+        DatabaseItemID::Folder(_) => 4,
+        DatabaseItemID::AccessMode(_) => 3,
+        DatabaseItemID::ChatConfiguration(_) => 5,
+        DatabaseItemID::Notification(_) => 6,
+        _ => 100
+    };
+    if index < 100 && cursors.chosen_tab != index {
+        cursors.anything_new_for[index] = true;
     }
 }
 
@@ -717,12 +735,12 @@ pub fn app_page() -> Html {
             <div id="top-bar">
                 <div id="menu-bar">
                     <button class="menu-item" id={values[0].clone()} onclick={tab_picker_callbacks[0].clone()}>{"LOGO HERE"}</button>
-                    <button class="menu-item" id={values[1].clone()} onclick={tab_picker_callbacks[1].clone()}>{"Chat"}</button>
-                    <button class="menu-item" id={values[2].clone()} onclick={tab_picker_callbacks[2].clone()}>{"Tags"}</button>
-                    <button class="menu-item" id={values[3].clone()} onclick={tab_picker_callbacks[3].clone()}>{"Access Modes"}</button>
-                    <button class="menu-item" id={values[4].clone()} onclick={tab_picker_callbacks[4].clone()}>{"Files"}</button>
-                    <button class="menu-item" id={values[5].clone()} onclick={tab_picker_callbacks[5].clone()}>{"Configurations"}</button>
-                    <button class="menu-item" id={values[6].clone()} onclick={tab_picker_callbacks[6].clone()}>{"Notifications"}</button>
+                    <button class="menu-item" id={values[1].clone()} onclick={tab_picker_callbacks[1].clone()}>{format!("Chat{}", if second_db_here.cursors.anything_new_for[1] {" ●"} else {""})}</button>
+                    <button class="menu-item" id={values[2].clone()} onclick={tab_picker_callbacks[2].clone()}>{format!("Tags{}", if second_db_here.cursors.anything_new_for[2] {" ●"} else {""})}</button>
+                    <button class="menu-item" id={values[3].clone()} onclick={tab_picker_callbacks[3].clone()}>{format!("Access Modes{}", if second_db_here.cursors.anything_new_for[3] {" ●"} else {""})}</button>
+                    <button class="menu-item" id={values[4].clone()} onclick={tab_picker_callbacks[4].clone()}>{format!("Files{}", if second_db_here.cursors.anything_new_for[4] {" ●"} else {""})}</button>
+                    <button class="menu-item" id={values[5].clone()} onclick={tab_picker_callbacks[5].clone()}>{format!("Configurations{}", if second_db_here.cursors.anything_new_for[5] {" ●"} else {""})}</button>
+                    <button class="menu-item" id={values[6].clone()} onclick={tab_picker_callbacks[6].clone()}>{format!("Notifications{}", if second_db_here.cursors.anything_new_for[6] {" ●"} else {""})}</button>
                     <select class="menu-item" ref={access_mode_select} onchange={access_mode_callback}>
                         {access_modes_htmls}
                     </select>
