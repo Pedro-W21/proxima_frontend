@@ -1,4 +1,5 @@
 #![feature(iter_intersperse)]
+#![feature(string_remove_matches)]
 mod app;
 mod db_sync;
 mod tabs;

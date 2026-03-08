@@ -1,3 +1,4 @@
+use html_parser::{Dom, Node};
 use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
 use proxima_backend::database::chats::SessionType;
@@ -6,7 +7,7 @@ use proxima_backend::database::{DatabaseItem, DatabaseItemID, DatabaseRequestVar
 use proxima_backend::web_payloads::DBPayload;
 use wasm_bindgen_futures::spawn_local;
 use yew::virtual_dom::VNode;
-use yew::{AttrValue, Callback, Event, Html, MouseEvent, UseReducerHandle, function_component, html, use_context, use_node_ref};
+use yew::{AttrValue, Callback, Event, Html, MouseEvent, Properties, UseReducerHandle, function_component, html, use_context, use_node_ref, use_state_eq};
 
 use crate::app::{DatabaseAction, DatabaseState, PrintArgs, ProximaState, invoke, make_ai_request, make_db_request};
 use crate::db_sync::get_delta_for_add;
@@ -244,9 +245,8 @@ pub fn chat_tab() -> Html {
                                 chat.context.get_parts().iter().map(|context_part| {
                                     if context_part.in_visible_position() {
                                         html!(
-                                            <div class={if context_part.is_user() {"standard-padding-margin-corners"} else {"standard-padding-margin-corners nonuser-turn"}}>
-                                            <div> {context_part.data_to_text().iter().map(|string| {VNode::from_html_unchecked(AttrValue::from(to_html(&string.lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}).collect::<Vec<Html>>() /*context_part.data_to_text().iter().map(|string| {string.split('\n').collect::<Vec<&str>>()}).flatten().map(|string| {html!(string)}).intersperse(html!(<br/>)).collect::<Vec<Html>>()*/}</div>
-                                            </div>
+                                            <ContextPartShow context_part={context_part.clone()}/>
+                                            
                                         )
                                     }
                                     else {
@@ -301,4 +301,284 @@ fn shorten_title_to_x_chars(title:String, max_chars:usize) -> String {
         }
     }
     out
+}
+
+#[derive(Properties, PartialEq)]
+pub struct ContextPartProp {
+    context_part:ContextPart
+}
+
+#[function_component(ContextPartShow)]
+fn context_part(prop:&ContextPartProp) -> Html {
+    let mut all_text = prop.context_part.data_to_single_text();
+    if prop.context_part.is_user() {
+        all_text = all_text.trim().to_string();
+        all_text.remove_matches("<user_prompt>");
+        all_text.remove_matches("</user_prompt>");
+        html!(
+            <div class="standard-padding-margin-corners">
+            <div> {VNode::from_html_unchecked(AttrValue::from(to_html(&all_text.lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}</div>
+            </div>
+        )
+    }
+    else {
+        match Dom::parse(&all_text) {
+            Ok(dom) => {
+                let mut htmls = Vec::with_capacity(dom.children.len());
+                for child in dom.children {
+                    if let Some(elem) = child.element() {
+                        if elem.name == "think" {
+                            htmls.push(
+                                html!(
+                                    <ThinkingPartShow txt={elem.source_span.text.clone()} finished=true/>
+                                )
+                            );
+                        }
+                        else if elem.name == "call" && elem.children.len() >= 3 && let Some(tool_child) = elem.children[0].element() && tool_child.children.len() > 0 && let Some(tool_name) = tool_child.children[0].text() {
+                            htmls.push(
+                                html!(
+                                    <CallPartShow txt={elem.source_span.text.clone()} tool_name={tool_name.to_string()} finished=true/>
+                                )
+                            );
+                        }
+                        else if elem.name == "outputs" {
+                            htmls.push(
+                                html!(
+                                    <CallOutputPartShow txt={elem.source_span.text.clone()}/>
+                                )
+                            );
+                        }
+                        else if elem.name == "response" {
+                            htmls.push(
+                                html!(
+                                    <ResponsePartShow children={elem.children.clone()}/>
+                                )
+                            );
+                        }
+                        else if elem.source_span.text.trim().len() > 0 {
+                            htmls.push(
+                                html!(
+                                    <div> 
+                                    <div>{VNode::from_html_unchecked(AttrValue::from(to_html(elem.source_span.text.trim())))}</div>
+                                    </div>
+                                )
+                                
+                            );
+                        }
+                    }
+                    else if let Some(txt) = child.text() && txt.trim().len() > 0 {
+                        htmls.push(
+                            html!(
+                                <div> 
+                                    <div>{VNode::from_html_unchecked(AttrValue::from(to_html(&txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}</div>
+                                </div>
+                            )
+                            
+                        );
+                    }
+                }
+                if htmls.len() > 0 {
+                    html!(
+                        <div class="standard-padding-margin-corners nonuser-turn">
+                        <div>{htmls}</div>
+                        </div>
+                    )
+                }
+                else {
+                    html!()
+                }
+            },
+            Err(_) => if all_text.contains("<think>") {
+                html!(
+                    <div class="standard-padding-margin-corners nonuser-turn">
+                    <ThinkingPartShow txt={all_text} finished=false/>
+                    </div>
+                )
+            } 
+            else {
+
+                html!(
+                    <div class="standard-padding-margin-corners nonuser-turn">
+                    <div> {VNode::from_html_unchecked(AttrValue::from(to_html(all_text.trim())))}</div>
+                    </div>
+                )
+            }
+        }
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct ThinkingPartProp {
+    txt:String,
+    finished:bool
+}
+
+#[function_component(ThinkingPartShow)]
+fn thinking_part(prop:&ThinkingPartProp) -> Html {
+    let should_show = use_state_eq(|| {false});
+    let callback = {
+        let should_show = should_show.clone();
+        Callback::from(move |mouse_evt:MouseEvent| {
+            if *should_show {
+                should_show.set(false);
+            }
+            else {
+                should_show.set(true);
+            }
+        })
+    };
+    let name = if prop.finished {
+        if *should_show {
+            format!("Thought process (click to hide)")
+        }
+        else {
+            format!("Thought process (click to show)")
+        }
+    }
+    else {
+        if *should_show {
+            format!("Thinking... (click to hide)")
+        }
+        else {
+            format!("Thinking... (click to show)")
+        }
+    };
+    if *should_show {
+        html!(
+            <div>
+            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+            <div>{VNode::from_html_unchecked(AttrValue::from(to_html(prop.txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat().trim())))}</div>
+            </div>
+        )
+    }
+    else {
+        html!(
+            <div>
+            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+            </div>
+        )
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct CallPartProp {
+    txt:String,
+    tool_name:String,
+    finished:bool
+}
+
+#[function_component(CallPartShow)]
+fn call_part(prop:&CallPartProp) -> Html {
+    let should_show = use_state_eq(|| {false});
+    let callback = {
+        let should_show = should_show.clone();
+        Callback::from(move |mouse_evt:MouseEvent| {
+            if *should_show {
+                should_show.set(false);
+            }
+            else {
+                should_show.set(true);
+            }
+        })
+    };
+    let name = if prop.finished {
+        if *should_show {
+            format!("Tool call : {} (click to hide)", prop.tool_name)
+        }
+        else {format!("Tool call : {} (click to show)", prop.tool_name)
+        }
+    }
+    else {
+        if *should_show {
+            format!("Calling tool : {}... (click to hide)", prop.tool_name)
+        }
+        else {
+            format!("Calling tool : {}... (click to show)", prop.tool_name)
+        }
+    };
+    if *should_show {
+        html!(
+            <div>
+            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+            <div>{VNode::from_html_unchecked(AttrValue::from(to_html(prop.txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat().trim())))}</div>
+            </div>
+        )
+    }
+    else {
+        html!(
+            <div>
+            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+            </div>
+        )
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct CallOutputPartProp {
+    txt:String,
+}
+
+#[function_component(CallOutputPartShow)]
+fn call_output_part(prop:&CallOutputPartProp) -> Html {
+    let should_show = use_state_eq(|| {false});
+    let callback = {
+        let should_show = should_show.clone();
+        Callback::from(move |mouse_evt:MouseEvent| {
+            if *should_show {
+                should_show.set(false);
+            }
+            else {
+                should_show.set(true);
+            }
+        })
+    };
+    let name = if *should_show {
+        format!("Tool call outputs (click to hide)")
+    }
+    else {
+        format!("Tool call outputs (click to show)")
+    };
+    if *should_show {
+        html!(
+            <div>
+            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+            <div>{VNode::from_html_unchecked(AttrValue::from(to_html(prop.txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat().trim())))}</div>
+            </div>
+        )
+    }
+    else {
+        html!(
+            <div>
+            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+            </div>
+        )
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct ResponsePartProp {
+    children:Vec<Node>,
+}
+#[function_component(ResponsePartShow)]
+fn response_part(prop:&ResponsePartProp) -> Html {
+    let mut final_htmls = Vec::with_capacity(prop.children.len());
+    for child in &prop.children {
+        if let Some(elem) = child.element() && elem.name == "think" {
+            final_htmls.push(
+                html!(
+                    <ThinkingPartShow txt={elem.source_span.text.clone()} finished=true/>
+                )
+            );
+        }
+        else if let Some(txt) = child.text() {
+            final_htmls.push(html!(
+                <div> 
+                    <div>{VNode::from_html_unchecked(AttrValue::from(to_html(&txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}</div>
+                </div>
+            ));
+        }
+    }
+    html!(
+        <>{final_htmls}</>
+    )
 }
