@@ -163,12 +163,12 @@ pub fn chat_tab() -> Html {
         else if db_state.cursors.chosen_chat.is_some() && *id == db_state.cursors.chosen_chat.unwrap() {
             html!(
 
-                <div><button onclick={callback} class="chat-option chosen-chat">{match chat.get_title() {Some(title) => title.clone(), None => format!("Chat {}", *id)}}</button></div>
+                <div><button onclick={callback} class="chat-option chosen-chat text-left">{match chat.get_title() {Some(title) => shorten_title_to_x_chars(title.clone(), 20), None => format!("Chat {}", *id)}}</button></div>
             )
         }
         else {
             html!(
-                <div><button onclick={callback} class="chat-option">{match chat.get_title() {Some(title) => title.clone(), None => format!("Chat {}", *id)}}</button></div>
+                <div><button onclick={callback} class="chat-option text-left">{match chat.get_title() {Some(title) => shorten_title_to_x_chars(title.clone(), 20), None => format!("Chat {}", *id)}}</button></div>
             )
         }
     }).collect::<Html>();
@@ -285,4 +285,20 @@ pub fn chat_tab() -> Html {
             
         </div>
     }
+}
+
+fn shorten_title_to_x_chars(title:String, max_chars:usize) -> String {
+    let mut out = String::with_capacity(max_chars + 3);
+    let mut chars_in_out = 0;
+    for char in title.chars() {
+        if chars_in_out < max_chars {
+            out.insert(chars_in_out, char);
+            chars_in_out += 1;
+        }
+        else {
+            out += "...";
+            break;
+        }
+    }
+    out
 }

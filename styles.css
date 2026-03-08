@@ -30,6 +30,10 @@
   
 }
 
+.text-left {
+  text-align: left;
+}
+
 html,
 body {
   margin: 0;

@@ -1,5 +1,5 @@
 use proxima_backend::database::{DatabaseItemID, DatabaseRequestVariant};
-use proxima_backend::database::notifications::Notification;
+use proxima_backend::database::notifications::{Notification, NotificationReason};
 use proxima_backend::web_payloads::DBPayload;
 use wasm_bindgen_futures::spawn_local;
 use yew::{Callback, Html, MouseEvent, UseReducerHandle, function_component, html, use_context};
@@ -63,16 +63,43 @@ pub fn single_notification() -> Html {
                         db_state.dispatch(DatabaseAction::SetChat(Some(chat_id)));
                     })
                 };
+                let chat_title = match db_state.db.chats.get_chats().get(&chat_id) {
+                    Some(chat) => match chat.chat_title.clone() {
+                        Some(title) => format!("\"{title}\""),
+                        None => format!("{}", chat_id),
+                    },
+                    None => format!("{}", chat_id) 
+                };
                 html!(
                     <div class="label-input-combo most-horizontal-space third-level"> 
-                        <p class="standard-padding-margin-corners">{format!("Chat {} updated", chat_id)}</p>
+                        <p class="standard-padding-margin-corners">{format!("Chat {} updated", chat_title)}</p>
                         <button class="mainapp-button standard-padding-margin-corners" onclick={goto_callback}>{"Go to chat"}</button>
                     </div>
                 )
             },
-            _ => html!()
+            _ => html!(), 
         },
-        None => html!()
+        None => match my_notification.reason {
+            NotificationReason::Reminder => {
+                match my_notification.text.clone() {
+                    Some(txt) => html!(
+                        <div class="label-input-combo most-horizontal-space third-level"> 
+                            <p class="standard-padding-margin-corners">{format!("Reminder : {txt}")}</p>
+                            
+                        </div>
+                    ),
+                    None => html!(
+                        <div class="label-input-combo most-horizontal-space third-level"> 
+                            <p class="standard-padding-margin-corners">{format!("Reminder")}</p>
+                            
+                        </div>
+                    )
+                }
+                
+            },
+            NotificationReason::Checklist(_) => html!(),
+            _ => html!()
+        }
     };
 
     let delete_callback = {

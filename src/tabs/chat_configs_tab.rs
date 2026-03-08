@@ -197,7 +197,8 @@ pub fn chat_configs_tab() -> Html {
                                 AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
                             ))),
                         "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
-                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { access_mode_id: db_state.cursors.chosen_access_mode })),
+                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, None),
+                        "Jobs" => ChatSetting::Tool(ProximaTool::Jobs, None),
                         _ => panic!("Impossible")
                     },
                     ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -269,7 +270,8 @@ pub fn chat_configs_tab() -> Html {
                             )))
                         },
                         "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
-                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { access_mode_id: db_state.cursors.chosen_access_mode })),
+                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, None),
+                        "Jobs" => ChatSetting::Tool(ProximaTool::Jobs, None),
                         _ => panic!("Impossible")
                     },
                     ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -341,7 +343,8 @@ pub fn chat_configs_tab() -> Html {
                                 AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
                             ))),
                         "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
-                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { access_mode_id: db_state.cursors.chosen_access_mode })),
+                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, None),
+                        "Jobs" => ChatSetting::Tool(ProximaTool::Jobs, None),
                         _ => panic!("Impossible")
                     },
                     ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -470,6 +473,7 @@ pub fn chat_configs_tab() -> Html {
                                         "Agent" => ProximaTool::Agent,
                                         "RNG" => ProximaTool::Rng,
                                         "Memory" => ProximaTool::Memory,
+                                        "Jobs" => ProximaTool::Jobs,
                                         _ => panic!("Should be impossible")
                                     };
                                     let mut allocatable = (*allocatable_agent_tools).clone();
@@ -494,6 +498,7 @@ pub fn chat_configs_tab() -> Html {
                                         <option value={"Agent"}>{"Agent"}</option>
                                         <option value={"RNG"}>{"RNG"}</option>
                                         <option value={"Memory"}>{"Memory"}</option>
+                                        <option value={"Jobs"}>{"Jobs"}</option>
                                     </select>
                                     <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={add_tool_callback}>{"Add"}</button>
                                     <div class="list-holder">
@@ -519,6 +524,7 @@ pub fn chat_configs_tab() -> Html {
                                 <option value={"Agent"}>{"Agent"}</option>
                                 <option value={"RNG"}>{"RNG"}</option>
                                 <option value={"Memory"}>{"Memory"}</option>
+                                <option value={"Jobs"}>{"Jobs"}</option>
                             </select>
                             {addition}
                         </div>
