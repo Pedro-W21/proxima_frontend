@@ -190,7 +190,7 @@ pub fn access_modes_tab() -> Html {
                                 </th>
                             </tr>
                             <tr class="horizontal-flex max-height-of-container">
-                                <td class="list-holder">
+                                <td class="list-holder most-horizontal-space">
                                     {
                                         if db_state.db.tags.get_tags().len() > 0 {
                                             tag_htmls
@@ -200,7 +200,7 @@ pub fn access_modes_tab() -> Html {
                                         }
                                     }
                                 </td>
-                                <td class="list-holder">
+                                <td class="list-holder most-horizontal-space">
                                     {
                                         if db_state.db.tags.get_tags().len() > 0 {
                                             chosen_tag_htmls
