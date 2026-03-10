@@ -30,15 +30,13 @@ pub fn notification_tab() -> Html {
 
     html!(
         <div class="chat-part">
-            <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space-no-flex">
-                <div class="list-plus-other-col">
-                    <div>
-                        <h1>{"Current notifications"}</h1>
-                        <hr/>
-                    </div>
-                    <div class="list-holder all-vertical-space-flex">
-                        {notification_htmls}
-                    </div>
+            <div class="vertical-flex standard-padding-margin-corners first-level most-horizontal-space-no-flex">
+                <div>
+                    <h1>{"Current notifications"}</h1>
+                    <hr/>
+                </div>
+                <div class="list-holder">
+                    {notification_htmls}
                 </div>
             </div>
         </div>

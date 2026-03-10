@@ -143,9 +143,7 @@ pub fn access_modes_tab() -> Html {
 
     html!{
         <div class="chat-part">
-            <div class="all-vertical-space standard-padding-margin-corners first-level">
-
-                <div class="list-plus-other-col">
+            <div class="vertical-flex max-height-of-container standard-padding-margin-corners first-level">
                     <div>
                         <h1>{"Access Modes"}</h1>
                         <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_tag_callback}>{"New Access Mode"}</button>
@@ -162,9 +160,8 @@ pub fn access_modes_tab() -> Html {
                             }
                         }
                     </div>
-                </div>
             </div>
-            <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
+            <div class="vertical-flex max-height-of-container standard-padding-margin-corners first-level most-horizontal-space">
                 <h1> {
                     match chosen_am_by_id {
                         Some(tag) => {format!("Currently modifying : {}", tag.get_name())},
@@ -172,29 +169,28 @@ pub fn access_modes_tab() -> Html {
                     }
                 }
                 </h1>
-                <div class="multi-input-container second-level standard-padding-margin-corners">
+                <div class="multi-input-container second-level standard-padding-margin-corners vertical-flex max-height-of-container">
                     <div class="label-input-combo standard-padding-margin-corners third-level">
                         <p>{"Access mode name (obligatory) : "}</p>
                         <input class="standard-padding-margin-corners" placeholder="Enter an access mode name here..." ref={am_name_ref}/>
                         
                     </div>
-                    <div class="list-plus-other-col third-level standard-padding-margin-corners">
+                    <div class="third-level standard-padding-margin-corners vertical-flex max-height-of-container">
                         <h2>
                             {"What tags are associated with this access mode ?"}
                         </h2>
-                        <table>
-                            <tr>
-                                <th>
+                        <table class="vertical-flex max-height-of-container">
+                            <tr class="horizontal-flex">
+                                <th class="most-horizontal-space">
                                     {"Available tags"}
                                 </th>
-                                <th>
+                                <th class="most-horizontal-space">
 
                                     {"Chosen tags"}
                                 </th>
                             </tr>
-                            <tr>
-                                <td>
-                                <div class="list-holder">
+                            <tr class="horizontal-flex max-height-of-container">
+                                <td class="list-holder">
                                     {
                                         if db_state.db.tags.get_tags().len() > 0 {
                                             tag_htmls
@@ -203,10 +199,8 @@ pub fn access_modes_tab() -> Html {
                                             html!({"No tags left to add"})
                                         }
                                     }
-                                </div>
                                 </td>
-                                <td>
-                                <div class="list-holder">
+                                <td class="list-holder">
                                     {
                                         if db_state.db.tags.get_tags().len() > 0 {
                                             chosen_tag_htmls
@@ -215,7 +209,6 @@ pub fn access_modes_tab() -> Html {
                                             html!({"Add tags to this access mode :)"})
                                         }
                                     }
-                                </div>
                                 </td>
                             </tr>
                         </table>

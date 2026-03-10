@@ -600,64 +600,58 @@ pub fn chat_configs_tab() -> Html {
     };
     html!(
         <div class="chat-part">
-            <div class="all-vertical-space standard-padding-margin-corners first-level at-most-a-sixth-width">
+            <div class="vertical-flex standard-padding-margin-corners first-level at-most-a-sixth-width max-height-of-container">
+                <div>
+                    <h1>{"Chat configurations"}</h1>
+                    <input class="standard-padding-margin-corners most-horizontal-space-no-flex" placeholder="Chat config name..." ref={cc_name_ref}/>
+                    <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={new_cc_callback}>{"New Chat Configuration"}</button>
+                    <hr/>
+                </div>
 
-                <div class="list-plus-other-col">
-                    <div>
-                        <h1>{"Chat configurations"}</h1>
-                        <input class="standard-padding-margin-corners most-horizontal-space-no-flex" placeholder="Chat config name..." ref={cc_name_ref}/>
-                        <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={new_cc_callback}>{"New Chat Configuration"}</button>
-                        <hr/>
-                    </div>
-
-                    <div class="list-holder most-horizontal-space-no-flex">
-                        {
-                            if db_state.db.configs.get_configs().len() > 0 {
-                                ccs_htmls
-                            }
-                            else {
-                                html!({"To create a chat configuration, please give it a non-empty name and click \"New Configuration\" above"})
-                            }
+                <div class="list-holder most-horizontal-space-no-flex">
+                    {
+                        if db_state.db.configs.get_configs().len() > 0 {
+                            ccs_htmls
                         }
-                    </div>
+                        else {
+                            html!({"To create a chat configuration, please give it a non-empty name and click \"New Configuration\" above"})
+                        }
+                    }
                 </div>
             </div>
-            <div class="all-vertical-space standard-padding-margin-corners first-level at-most-a-sixth-width">
-
-                <div class="list-plus-other-col">
-                    <div>
-                        <h1>{"Configuration settings"}</h1>
-                        <h2>
-                        {
-                            match db_state.cursors.config_for_modification {
-                                Some(config) => html!({format!("For : {}", db_state.db.configs.get_configs()[config].name.clone())}),
-                                None => html!()
-                            }
+            <div class="vertical-flex standard-padding-margin-corners first-level at-most-a-sixth-width max-height-of-container">
+                <div>
+                    <h1>{"Configuration settings"}</h1>
+                    <h2>
+                    {
+                        match db_state.cursors.config_for_modification {
+                            Some(config) => html!({format!("For : {}", db_state.db.configs.get_configs()[config].name.clone())}),
+                            None => html!()
                         }
-                        </h2>
-                        <select class="most-horizontal-space-no-flex standard-padding-margin-corners" ref={cc_setting_ref} onchange={select_settings_callback}>
-                            <option value={"Temperature"}>{"Temperature"}</option>
-                            <option value={"TopP"}>{"Top P"}</option>
-                            <option value={"Presence penalty"}>{"Presence penalty"}</option>
-                            <option value={"Repeat penalty"}>{"Repeat penalty"}</option>
-                            <option value={"System prompt"}>{"System prompt"}</option>
-                            <option value={"Initial Pre-prompt"}>{"Initial Pre-prompt"}</option>
-                            <option value={"Repeated Pre-prompt"}>{"Repeated Pre-prompt"}</option>
-                            <option value={"Max context length"}>{"Max context length"}</option>
-                            <option value={"Max response length"}>{"Max response length"}</option>
-                            <option value={"Tool"}>{"Tool"}</option>
-                        </select>
-                        <hr/>
-                    </div>
+                    }
+                    </h2>
+                    <select class="most-horizontal-space-no-flex standard-padding-margin-corners" ref={cc_setting_ref} onchange={select_settings_callback}>
+                        <option value={"Temperature"}>{"Temperature"}</option>
+                        <option value={"TopP"}>{"Top P"}</option>
+                        <option value={"Presence penalty"}>{"Presence penalty"}</option>
+                        <option value={"Repeat penalty"}>{"Repeat penalty"}</option>
+                        <option value={"System prompt"}>{"System prompt"}</option>
+                        <option value={"Initial Pre-prompt"}>{"Initial Pre-prompt"}</option>
+                        <option value={"Repeated Pre-prompt"}>{"Repeated Pre-prompt"}</option>
+                        <option value={"Max context length"}>{"Max context length"}</option>
+                        <option value={"Max response length"}>{"Max response length"}</option>
+                        <option value={"Tool"}>{"Tool"}</option>
+                    </select>
+                    <hr/>
+                </div>
 
-                    <div class="list-holder most-horizontal-space-no-flex">
-                        {
-                            chosen_cc_settings_htmls
-                        }
-                    </div>
+                <div class="list-holder most-horizontal-space-no-flex">
+                    {
+                        chosen_cc_settings_htmls
+                    }
                 </div>
             </div>
-            <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
+            <div class="vertical-flex standard-padding-margin-corners first-level most-horizontal-space max-height-of-container">
                 <h1> 
                 {"Modifying settings here"}
                 </h1>

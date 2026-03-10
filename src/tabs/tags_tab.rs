@@ -152,27 +152,25 @@ pub fn tags_tab() -> Html {
 
     html!{
         <div class="chat-part">
-            <div class="all-vertical-space standard-padding-margin-corners first-level">
-                <div class="list-plus-other-col">
-                    <div>
-                        <h1>{"Tags"}</h1>
-                        <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_tag_callback}>{"New tag"}</button>
-                        <hr/>
-                    </div>
+            <div class="standard-padding-margin-corners first-level vertical-flex max-height-of-container">
+                <div>
+                    <h1>{"Tags"}</h1>
+                    <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_tag_callback}>{"New tag"}</button>
+                    <hr/>
+                </div>
 
-                    <div class="list-holder">
-                        {
-                            if db_state.db.tags.get_tags().len() > 0 {
-                                tag_htmls
-                            }
-                            else {
-                                html!({"No tags yet !"})
-                            }
+                <div class="list-holder">
+                    {
+                        if db_state.db.tags.get_tags().len() > 0 {
+                            tag_htmls
                         }
-                    </div>
+                        else {
+                            html!({"No tags yet !"})
+                        }
+                    }
                 </div>
             </div>
-            <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
+            <div class="standard-padding-margin-corners first-level most-horizontal-space vertical-flex max-height-of-container">
                 <h1> {
                     match chosen_tag_by_id {
                         Some(tag) => {format!("Currently modifying : {}", tag.get_name())},
@@ -180,18 +178,19 @@ pub fn tags_tab() -> Html {
                     }
                 }
                 </h1>
-                <div class="multi-input-container second-level standard-padding-margin-corners">
-                    
-                    <div class="label-input-combo third-level standard-padding-margin-corners">
-                        <p>{"Tag name (obligatory) : "}</p>
-                        <input class="standard-padding-margin-corners" placeholder="Enter a tag name here..." ref={tag_name_ref}/>
-                        
+                <div class="multi-input-container second-level standard-padding-margin-corners vertical-flex max-height-of-container">
+                    <div>
+                        <div class="label-input-combo third-level standard-padding-margin-corners">
+                            <p>{"Tag name (obligatory) : "}</p>
+                            <input class="standard-padding-margin-corners" placeholder="Enter a tag name here..." ref={tag_name_ref}/>
+                            
+                        </div>
+                        <div class="label-input-combo third-level standard-padding-margin-corners">
+                            <p>{"Tag description (optional) : "}</p>
+                            <input class="standard-padding-margin-corners" placeholder="Enter tag descirption here... keep it simple !" ref={tag_desc_ref}/>
+                        </div>
                     </div>
-                    <div class="label-input-combo third-level standard-padding-margin-corners">
-                        <p>{"Tag description (optional) : "}</p>
-                        <input class="standard-padding-margin-corners" placeholder="Enter tag descirption here... keep it simple !" ref={tag_desc_ref}/>
-                    </div>
-                    <div class="list-plus-other-col third-level standard-padding-margin-corners">
+                    <div class="third-level standard-padding-margin-corners vertical-flex max-height-of-container">
                         <h2>
                             {
                                 match db_state.cursors.chosen_parent_tag {

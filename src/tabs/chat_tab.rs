@@ -208,76 +208,72 @@ pub fn chat_tab() -> Html {
     };
     html!{
         <div class="chat-part">
-            <div class="all-vertical-space standard-padding-margin-corners first-level">
-                <div class="list-plus-other-col">
-                    <div>
-                        <h1>{"Past chats"}</h1>
-                        <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_chat_callback}>{"New chat"}</button>
-                        <hr/>
-                    </div>
-                    <div class="list-holder all-vertical-space-flex">
-                        {
-                            if db_state.db.chats.get_chats().len() > 0 {
-                                chat_htmls
-                            }
-                            else {
-                                html!({"No chats yet !"})
-                            }
+            <div class="standard-padding-margin-corners first-level vertical-flex max-height-of-container">
+                <div>
+                    <h1>{"Past chats"}</h1>
+                    <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_chat_callback}>{"New chat"}</button>
+                    <hr/>
+                </div>
+                <div class="list-holder">
+                    {
+                        if db_state.db.chats.get_chats().len() > 0 {
+                            chat_htmls
                         }
-                    </div>
+                        else {
+                            html!({"No chats yet !"})
+                        }
+                    }
                 </div>
             </div>
-            <div class="all-vertical-space standard-padding-margin-corners first-level most-horizontal-space chat-tab-not-sidebar">
-                <div class="list-plus-other-col">
-                    <h1>{
+            <div class="standard-padding-margin-corners first-level most-horizontal-space vertical-flex max-height-of-container">
+                <h1>{
+                match chosen_chat_by_id {
+                    Some(chat) => match &chat.chat_title {
+                        Some(title) => title.clone(),
+                        None => format!("Untitled Chat {}", chat.id),
+                    },
+                    None => "Please select a chat or start one :)".to_string()
+                }} 
+                </h1>
+                <div class="list-holder">
+                {
                     match chosen_chat_by_id {
-                        Some(chat) => match &chat.chat_title {
-                            Some(title) => title.clone(),
-                            None => format!("Untitled Chat {}", chat.id),
+                        Some(chat) => {
+                            chat.context.get_parts().iter().map(|context_part| {
+                                if context_part.in_visible_position() {
+                                    html!(
+                                        <ContextPartShow context_part={context_part.clone()}/>
+                                        
+                                    )
+                                }
+                                else {
+                                    html!()
+                                }
+                            }).collect()
                         },
-                        None => "Please select a chat or start one :)".to_string()
-                    }} 
-                    </h1>
-                    <div class="list-holder all-vertical-space-flex">
-                    {
-                        match chosen_chat_by_id {
-                            Some(chat) => {
-                                chat.context.get_parts().iter().map(|context_part| {
-                                    if context_part.in_visible_position() {
-                                        html!(
-                                            <ContextPartShow context_part={context_part.clone()}/>
-                                            
-                                        )
-                                    }
-                                    else {
-                                        html!()
-                                    }
-                                }).collect()
-                            },
-                            None => Vec::new()
-                        }
+                        None => Vec::new()
                     }
-                    {
-                        match chosen_chat_by_id{
-                            Some(chat) => if chat.last_response_is_user() {
-                                html!(<h2>{"Waiting on the AI to respond..."}</h2>)
-                            }
-                            else {
-                                html!()
-                            },
-                            None => html!()
+                }
+                {
+                    match chosen_chat_by_id{
+                        Some(chat) => if chat.last_response_is_user() {
+                            html!(<h2>{"Waiting on the AI to respond..."}</h2>)
                         }
+                        else {
+                            html!()
+                        },
+                        None => html!()
                     }
-                    </div>
-                    <div class="label-input-combo bottom-bar most-horizontal-space-no-flex third-level standard-padding-margin-corners">
-                        <textarea placeholder="Have a prompt ?" ref={prompt_node_ref} class="standard-padding-margin-corners"/>
-                        <select class="standard-padding-margin-corners" ref={cc_select_ref} onchange={cc_select_callback}>
-                            <option value="NO CHAT CONFIG WHATSOEVER (please do not use this magic name for a real chat config)">{"None"}</option>
-                            {config_htmls}
-                        </select>
-                        <button class="mainapp-button standard-padding-margin-corners" onclick={prompt_send_callback}>{"Send"}</button>
-                        
-                    </div>
+                }
+                </div>
+                <div class="label-input-combo bottom-bar most-horizontal-space-no-flex third-level standard-padding-margin-corners">
+                    <textarea placeholder="Have a prompt ?" ref={prompt_node_ref} class="standard-padding-margin-corners"/>
+                    <select class="standard-padding-margin-corners" ref={cc_select_ref} onchange={cc_select_callback}>
+                        <option value="NO CHAT CONFIG WHATSOEVER (please do not use this magic name for a real chat config)">{"None"}</option>
+                        {config_htmls}
+                    </select>
+                    <button class="mainapp-button standard-padding-margin-corners" onclick={prompt_send_callback}>{"Send"}</button>
+                    
                 </div>
 
                 
