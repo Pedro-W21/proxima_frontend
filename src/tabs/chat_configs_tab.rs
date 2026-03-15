@@ -91,6 +91,32 @@ pub fn chat_configs_tab() -> Html {
         }
     }).collect::<Html>();
 
+    let delete_cc_setting_callback = {
+        let db_state = db_state.clone();
+        let proxima_state = proxima_state.clone();
+        Callback::from(move |mouse_evt:MouseEvent| {
+            let mut db_state = db_state.clone();
+            let proxima_state = proxima_state.clone();
+            if let Some(config_id) = db_state.cursors.config_for_modification && let Some(config) = db_state.db.configs.get_configs().get(&config_id) && let Some(setting) = db_state.cursors.chosen_setting {
+                let mut config = config.clone();
+                config.raw_settings.remove(setting);
+                let proxima_state = proxima_state.clone();
+                spawn_local(async move {
+                    let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::ChatConfig(config.clone())) };
+                    match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                        Ok(response) => {
+
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::ChatConfiguration(config_id), DatabaseItem::ChatConfig(config))]));
+                        },
+                        Err(()) => ()
+                    }
+                    db_state.dispatch(DatabaseAction::SetCurrentSetting(None));
+                    db_state.dispatch(DatabaseAction::SetConfigSettingID(None));
+                });
+            }
+        })
+    };
+
     let chosen_cc_settings_htmls = match db_state.cursors.config_for_modification {
         Some(config_id) => {
             let client_db = db_state.db.clone();
@@ -660,6 +686,18 @@ pub fn chat_configs_tab() -> Html {
                         chosen_cc_settings_htmls
                     }
                 </div>
+
+                <>
+                {
+                    match db_state.cursors.chosen_setting {
+                        Some(setting) => html!(<>
+                            
+                            <button class="mainapp-button standard-padding-margin-corners" onclick={delete_cc_setting_callback}>{"Delete Setting"}</button>
+                            </>),
+                        None => html!()
+                    }
+                }
+                </>
             </div>
             <div class="vertical-flex standard-padding-margin-corners first-level most-horizontal-space max-height-of-container">
                 <h1> 
