@@ -15,7 +15,7 @@ use markdown::to_html;
 use web_sys::{EventTarget, HtmlElement};
 use futures::StreamExt;
 
-use crate::{db_sync::{UserCursors, apply_server_updates, get_delta_for_add, get_next_id_for_category, handle_add, handle_add_reducible}, tabs::{access_modes_tab::AccessModesTab, chat_configs_tab::ChatConfigsTab, chat_tab::ChatTab, home_tab::HomeTab, notification_tab::{NotificationTab, generate_title_and_desc_for}, tags_tab::TagsTab}};
+use crate::{db_sync::{UserCursors, apply_server_updates, get_delta_for_add, get_next_id_for_category, handle_add_reducible}, tabs::{access_modes_tab::AccessModesTab, chat_configs_tab::ChatConfigsTab, chat_tab::ChatTab, home_tab::HomeTab, notification_tab::{NotificationTab, generate_title_and_desc_for}, tags_tab::TagsTab}};
 
 #[wasm_bindgen]
 extern "C" {
@@ -700,20 +700,20 @@ pub fn app_page() -> Html {
             let access_mode_name = select_node.cast::<web_sys::HtmlInputElement>()
             .unwrap()
             .value();
-            match db_state.db.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+            match db_state.db.access_modes.get_modes().iter().find(|(i,access_mode)| {
                 access_mode.get_name() == &access_mode_name
             }) {
                 Some((id, access_mode)) => {
                     let second_db_clone = db_clone.clone();
                     let access_mode_name_clone = access_mode_name.clone();
-                    if db_state.cursors.chosen_access_mode != id {
+                    if db_state.cursors.chosen_access_mode != *id {
                         db_state.dispatch(DatabaseAction::SetChat(None));
                         
                         db_state.dispatch(DatabaseAction::SetModifiedTag(None));
                         db_state.dispatch(DatabaseAction::SetParentTag(None));
                     }
                     
-                    db_state.dispatch(DatabaseAction::SetGlobalAM(id));
+                    db_state.dispatch(DatabaseAction::SetGlobalAM(*id));
                     spawn_local(async move {
                         let args = serde_wasm_bindgen::to_value(&PrintArgs {value:access_mode_name_clone}).unwrap();
                         invoke("print_to_console", args).await;
@@ -725,7 +725,7 @@ pub fn app_page() -> Html {
             
         })
     };
-    let access_modes_htmls:Vec<Html> = second_db_here.db.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
+    let access_modes_htmls:Vec<Html> = second_db_here.db.access_modes.get_modes().iter().map(|(id, access_mode)| {
         html!(
             <option value={access_mode.get_name().clone()}>{access_mode.get_name().clone()}</option>
         )

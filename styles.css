@@ -163,6 +163,16 @@ tr td {
   flex-direction: row;
 }
 
+.chat-title-display {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.align-right {
+  align-self: right;
+}
+
 .vertical-flex {
   display: flex;
   flex-direction: column;
@@ -203,12 +213,14 @@ code {
   overflow-y: auto;
   overflow-x: hidden;
   min-height:0;
-  max-width: 100vw;
+  min-width: 0;
+  max-width: 90vw;
   display:block;
   flex-grow: 1;
   height: 100%;
   max-height: 100%;
 }
+
 
 .fixed-80-vh {
   height:60vh;

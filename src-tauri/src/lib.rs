@@ -15,9 +15,7 @@ use openai::Credentials;
 use proxima_backend::{
     ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant},
     database::{
-        chats::ChatID,
-        context::{ContextPart, ContextPosition},
-        ClientUpdate, DatabaseInfoRequest, DatabaseReplyVariant, DatabaseRequestVariant,
+        ClientUpdate, DatabaseInfoRequest, DatabaseItem, DatabaseReplyVariant, DatabaseRequestVariant, chats::ChatID, context::{ContextPart, ContextPosition}
     },
     web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse},
 };
@@ -117,6 +115,10 @@ async fn streaming_update_task(
                                 if let Ok(request_variant) =
                                     serde_json::from_str::<ClientUpdate>(&string)
                                 {
+                                    match request_variant.clone() {
+                                        ClientUpdate::ItemUpdate(id, DatabaseItem::Tag(tag)) => {dbg!(id, tag.get_id());},
+                                        _ => ()
+                                    }
                                     println!("[backend] emitting client update {token_id}");
                                     app_state
                                         .emit("client-update", (request_variant.clone(), token_id))

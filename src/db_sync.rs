@@ -48,48 +48,27 @@ pub fn apply_server_updates(client_db: &mut ProxDatabase, updates:Vec<(DatabaseI
     for (id, new_item) in updates {
         match new_item {
             DatabaseItem::AccessMode(access_mode) => {
-                if access_mode.get_id() >= client_db.access_modes.get_modes().len() {
+                if access_mode.get_id() >= client_db.access_modes.latest_id {
                     client_db.access_modes.add_mode(access_mode);
                 }
                 else {
-                    let id = access_mode.get_id();
-                    if !client_db.insert_or_update(DatabaseItem::AccessMode(access_mode)) {
-                        match cursors.access_mode_for_modification {
-                            Some(am) => if am >= id {
-                                new_cursors.access_mode_for_modification = Some(am + 1);
-                            },
-                            None => ()
-                        }
-                        if cursors.chosen_access_mode >= id {
-                            new_cursors.chosen_access_mode += 1;
-                        }
-                    }
-                    
+                    client_db.access_modes.update_mode(access_mode);
                 }
             },
             DatabaseItem::Chat(chat) => {
-                if chat.get_id() >= client_db.chats.get_chats().len() {
+                if chat.get_id() >= client_db.chats.latest_id {
                     client_db.chats.add_chat_raw(chat);
                 }
                 else {
-                    let id = chat.get_id();
-                    if !client_db.insert_or_update(DatabaseItem::Chat(chat)) {
-                        match cursors.chosen_chat {
-                            Some(chat_id) => if chat_id >= id {
-                                new_cursors.chosen_chat = Some(chat_id + 1);
-                            },
-                            None => ()
-                        }
-                    }
-                   
+                    client_db.chats.update_chat(chat);
                 }
             },
             DatabaseItem::Device(device) => {
-                if device.get_id() >= client_db.devices.get_devices().len() {
+                if device.get_id() >= client_db.devices.latest_id {
                     client_db.devices.add_device(device);
                 }
                 else {
-                    client_db.insert_or_update(DatabaseItem::Device(device));
+                    client_db.devices.update_device(device);
                 }
             },
             DatabaseItem::File(file) => {
@@ -97,7 +76,7 @@ pub fn apply_server_updates(client_db: &mut ProxDatabase, updates:Vec<(DatabaseI
                     client_db.files.add_file_raw(file);
                 }
                 else {
-                    client_db.insert_or_update(DatabaseItem::File(file));
+                    client_db.files.get_file_mut(file.id).map(|f| {*f = file});
                 }
             },
             DatabaseItem::Folder(folder) => {
@@ -105,62 +84,24 @@ pub fn apply_server_updates(client_db: &mut ProxDatabase, updates:Vec<(DatabaseI
                     client_db.folders.add_folder_raw(folder);
                 }
                 else {
-                    client_db.insert_or_update(DatabaseItem::Folder(folder));
+                    client_db.folders.get_folder_mut(folder.id).map(|f| {*f = folder});
                 }
             },
             DatabaseItem::Tag(tag) => {
-                if tag.get_id() >= client_db.tags.get_tags().len() {
+                if tag.get_id() >= client_db.tags.last_id {
                     client_db.tags.add_tag_raw(tag);
                 }
                 else {
-                    let id = tag.get_id();
-                    if !client_db.insert_or_update(DatabaseItem::Tag(tag)) {
-                        match cursors.chosen_tag {
-                            Some(tag_id) => if tag_id >= id {
-                                new_cursors.chosen_tag = Some(tag_id + 1);
-                            }
-                            None => ()
-                        }
-                        match cursors.chosen_parent_tag {
-                            Some(tag_id) => if tag_id >= id {
-                                new_cursors.chosen_parent_tag = Some(tag_id + 1);
-                            }
-                            None => ()
-                        }
-                        let mut new_set = HashSet::new();
-                        for tag_id in cursors.chosen_access_mode_tags.iter() {
-                            if *tag_id >= id {
-                                new_set.insert(*tag_id + 1);
-                            }
-                            else {
-                                new_set.insert(*tag_id);
-                            }
-                        }
-                        new_cursors.chosen_access_mode_tags = new_set;
-                    }
+                    client_db.tags.update_tag(tag);
                     
                 }
             },
             DatabaseItem::ChatConfig(config) => {
-                if config.id >= client_db.configs.get_configs().len() {
+                if config.id >= client_db.configs.latest_id {
                     client_db.configs.add_config(config);
                 }
                 else {
-                    let id = config.id;
-                    if !client_db.insert_or_update(DatabaseItem::ChatConfig(config)) {
-                        match cursors.chosen_config {
-                            Some(config_id) => if config_id >= id {
-                                new_cursors.chosen_config = Some(config_id + 1);
-                            },
-                            None => ()
-                        }
-                        match cursors.config_for_modification {
-                            Some(config_id) => if config_id >= id {
-                                new_cursors.config_for_modification = Some(config_id + 1);
-                            },
-                            None => ()
-                        }
-                    }
+                    client_db.configs.update_config(config);
                 }
             },
             DatabaseItem::UserData(user_data) => {
@@ -282,75 +223,4 @@ pub fn handle_add_reducible(client_db: &mut ProxDatabase, local_given_id:Databas
         _ => ()
     }
     new_cursors
-}
-
-pub async fn handle_add<F:AsyncFn(DatabaseRequestVariant) -> Result<DatabaseReplyVariant, ()>>(client_db: &mut ProxDatabase, local_given_id:DatabaseItemID, mut added_item:DatabaseItem, db_response:DatabaseReplyVariant, cursors:UserCursors, request_func:F) -> (UserCursors, DatabaseItemID) {
-    added_item.set_id(local_given_id.clone());
-    let mut new_cursors = cursors.clone();
-    let mut new_id = local_given_id.clone();
-    match db_response {
-        DatabaseReplyVariant::AddedItem(id) => if local_given_id != id {
-            for i in local_given_id.clone()..id.clone() {
-                match request_func(DatabaseRequestVariant::Get(i)).await {
-                    Ok(reply) => match reply {
-                        DatabaseReplyVariant::ReturnedItem(item) => client_db.insert_directly(item),
-                        _ => client_db.insert_directly(added_item.clone())
-                    },
-                    Err(()) => client_db.insert_directly(added_item.clone())
-                }
-
-            }
-            match local_given_id.clone() {
-                DatabaseItemID::AccessMode(local_id) => match id {
-                    DatabaseItemID::AccessMode(remote_id) => {
-                        match cursors.access_mode_for_modification {
-                            Some(am) => if am == local_id {
-                                new_cursors.access_mode_for_modification = Some(remote_id);
-                            }
-                            None => ()
-                        }
-                        if cursors.chosen_access_mode == local_id {
-                            new_cursors.chosen_access_mode = remote_id;
-                        }
-                    },
-                    _ => panic!("Wrong kind of id")
-                },
-                DatabaseItemID::Chat(local_id) => match id {
-                    DatabaseItemID::Chat(remote_id) => {
-                        match cursors.chosen_chat {
-                            Some(chat) => if chat == local_id {
-                                new_cursors.chosen_chat = Some(remote_id)
-                            },
-                            None => ()   
-                        }
-                    },
-                    _ => panic!("Wrong kind of id")
-                },
-                DatabaseItemID::Tag(local_id) => match id {
-                    DatabaseItemID::Tag(remote_id) => {
-                        match cursors.chosen_parent_tag {
-                            Some(tag) => if tag == local_id {
-                                new_cursors.chosen_parent_tag = Some(remote_id);
-                            },
-                            None => ()
-                        }
-                        match cursors.chosen_tag {
-                            Some(tag) => if tag == local_id {
-                                new_cursors.chosen_tag = Some(remote_id);
-                            },
-                            None => ()
-                        }
-                        if new_cursors.chosen_access_mode_tags.remove(&local_id) {
-                            new_cursors.chosen_access_mode_tags.insert(remote_id);
-                        }
-                    },
-                    _ => panic!("Wrong kind of id")
-                },
-                _ => ()
-            }
-            new_id = id;
-        },
-        _ => ()
-    }
-    (new_cursors, new_id)
 }

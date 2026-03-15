@@ -23,17 +23,19 @@ pub fn access_modes_tab() -> Html {
 
     let am_name_ref = use_node_ref();
 
-    let access_mode_htmls = db_state.db.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
+    let access_mode_htmls = db_state.db.access_modes.get_modes().iter().map(|(id, access_mode)| {
         let callback = {
 
             let db_state = db_state.clone();
-            let id_clone = id;
+            let id_clone = *id;
             Callback::from(move |mouse_evt:MouseEvent| {
                 db_state.dispatch(DatabaseAction::SetModifiedAM(None));
-                db_state.dispatch(DatabaseAction::SetTagsForAM(db_state.db.access_modes.get_modes()[id_clone].get_tags().clone()));
+                if let Some(mode) = db_state.db.access_modes.get_modes().get(&id_clone) {
+                    db_state.dispatch(DatabaseAction::SetTagsForAM(mode.get_tags().clone()));
+                }
             })
         };
-        if db_state.cursors.access_mode_for_modification.is_some() && id == db_state.cursors.access_mode_for_modification.unwrap() {
+        if db_state.cursors.access_mode_for_modification.is_some() && *id == db_state.cursors.access_mode_for_modification.unwrap() {
             html!(
 
                 <div><button onclick={callback} class="chat-option chosen-chat">{access_mode.get_name().clone()}</button></div>
@@ -55,7 +57,10 @@ pub fn access_modes_tab() -> Html {
                 db_state.dispatch(DatabaseAction::AddToTagsForAM(id_clone));
             })
         };
-        if db_state.cursors.chosen_access_mode_tags.contains(&id) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id) {
+        if let Some(mode) = db_state.db.access_modes.get_modes().get(&db_state.cursors.chosen_access_mode) && !mode.get_tags().contains(&id) {
+            html!()
+        }
+        else if db_state.cursors.chosen_access_mode_tags.contains(&id)  {
             html!()
         }
         else {
@@ -73,7 +78,10 @@ pub fn access_modes_tab() -> Html {
                 db_state.dispatch(DatabaseAction::RemoveFromTagsForAM(id_clone));
             })
         };
-        if !db_state.cursors.chosen_access_mode_tags.contains(&id) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id) {
+        if let Some(mode) = db_state.db.access_modes.get_modes().get(&db_state.cursors.chosen_access_mode) && !mode.get_tags().contains(&id) {
+            html!()
+        }
+        else if !db_state.cursors.chosen_access_mode_tags.contains(&id) {
             html!()
         }
         else {
@@ -92,7 +100,7 @@ pub fn access_modes_tab() -> Html {
         })
     };
 
-    let chosen_am_by_id = db_state.db.access_modes.get_modes().get((db_state.cursors.access_mode_for_modification.unwrap_or(1000000)));
+    let chosen_am_by_id = db_state.db.access_modes.get_modes().get(&(db_state.cursors.access_mode_for_modification.unwrap_or(1000000)));
 
     let am_update_callback = {
         let db_state = db_state.clone();
@@ -107,18 +115,20 @@ pub fn access_modes_tab() -> Html {
 
             match db_state.cursors.access_mode_for_modification {
                 Some(am_id) => {
-                    let mut am = db_state.db.access_modes.get_modes()[am_id].clone();
-                    am.name = am_name;
-                    am.tags = db_state.cursors.chosen_access_mode_tags.clone();
-                    db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::AccessMode(am_id), DatabaseItem::AccessMode(am.clone()))]));
-                    let proxima_state = proxima_state.clone();
-                    spawn_local(async move {
-                        let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::AccessMode(am)) };
-                        match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                            Ok(response) => (),
-                            Err(()) => ()
-                        }
-                    });
+                    if let Some(am) = db_state.db.access_modes.get_modes().get(&am_id) {
+                        let mut am = am.clone();
+                        am.name = am_name;
+                        am.tags = db_state.cursors.chosen_access_mode_tags.clone();
+                        db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::AccessMode(am_id), DatabaseItem::AccessMode(am.clone()))]));
+                        let proxima_state = proxima_state.clone();
+                        spawn_local(async move {
+                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::AccessMode(am)) };
+                            match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                Ok(response) => (),
+                                Err(()) => ()
+                            }
+                        });
+                    }
                 },
                 None => {
                     let am = AccessMode::new(0, db_state.cursors.chosen_access_mode_tags.clone(), am_name);

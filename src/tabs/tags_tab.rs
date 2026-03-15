@@ -34,7 +34,7 @@ pub fn tags_tab() -> Html {
                 second_db.dispatch(DatabaseAction::SetParentTag(second_db.db.tags.get_tags().get(&id_clone).unwrap().get_parent()));
             })
         };
-        if !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id) {
+        if let Some(access_mode_t) = db_state.db.access_modes.get_modes().get(&db_state.cursors.chosen_access_mode) && !access_mode_t.get_tags().contains(&id) {
             html!()
         }
         else if db_state.cursors.chosen_tag.is_some() && *id == db_state.cursors.chosen_tag.unwrap() {
@@ -59,7 +59,10 @@ pub fn tags_tab() -> Html {
                 second_db.dispatch(DatabaseAction::SetParentTag(Some(id_clone)));
             })
         };
-        if (db_state.cursors.chosen_tag.is_some() && *id == db_state.cursors.chosen_tag.unwrap()) || !db_state.db.access_modes.get_modes()[db_state.cursors.chosen_access_mode].get_tags().contains(&id)  {
+        if let Some(access_mode_t) = db_state.db.access_modes.get_modes().get(&db_state.cursors.chosen_access_mode) && !access_mode_t.get_tags().contains(&id) {
+            html!()
+        }
+        else if (db_state.cursors.chosen_tag.is_some() && *id == db_state.cursors.chosen_tag.unwrap())  {
             html!()
         }
         else if db_state.cursors.chosen_parent_tag.is_some() && *id == db_state.cursors.chosen_parent_tag.unwrap() {
@@ -125,24 +128,26 @@ pub fn tags_tab() -> Html {
                     let mut tag_id = tag.get_id();
 
                     let am_id = db_state.cursors.chosen_access_mode;
-                    let (new_am_0, new_am_n) = db_state.db.access_modes.get_updated_modes_from_association(am_id, tag_id);
-                    db_state.dispatch(DatabaseAction::ApplyUpdates(vec![
-                        (DatabaseItemID::AccessMode(0), DatabaseItem::AccessMode(new_am_0.clone())),
-                        (DatabaseItemID::AccessMode(new_am_n.get_id()), DatabaseItem::AccessMode(new_am_n.clone())),
-                    ]));
-                    let proxima_state = proxima_state.clone();
-                    spawn_local(async move {
-                        let (delta, new_id, new_item) = get_delta_for_add(
-                            DatabaseItemID::Tag(tag_id),
-                            DatabaseItem::Tag(tag.clone()),
-                            async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
-                        ).await;
-                        make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request:DatabaseRequestVariant::Update(DatabaseItem::AccessMode(new_am_0)) }, proxima_state.chat_url.clone()).await;
-                        make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request:DatabaseRequestVariant::Update(DatabaseItem::AccessMode(new_am_n)) }, proxima_state.chat_url.clone()).await;
-                        
+                    if let Some((new_am_0, new_am_n)) = db_state.db.access_modes.get_updated_modes_from_association(am_id, tag_id) {
+                        db_state.dispatch(DatabaseAction::ApplyUpdates(vec![
+                            (DatabaseItemID::AccessMode(0), DatabaseItem::AccessMode(new_am_0.clone())),
+                            (DatabaseItemID::AccessMode(new_am_n.get_id()), DatabaseItem::AccessMode(new_am_n.clone())),
+                        ]));
+                        let proxima_state = proxima_state.clone();
+                        spawn_local(async move {
+                            let (delta, new_id, new_item) = get_delta_for_add(
+                                DatabaseItemID::Tag(tag_id),
+                                DatabaseItem::Tag(tag.clone()),
+                                async |request| {make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request }, proxima_state.chat_url.clone()).await.map(|response| {response.reply})}
+                            ).await;
+                            make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request:DatabaseRequestVariant::Update(DatabaseItem::AccessMode(new_am_0)) }, proxima_state.chat_url.clone()).await;
+                            make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request:DatabaseRequestVariant::Update(DatabaseItem::AccessMode(new_am_n)) }, proxima_state.chat_url.clone()).await;
+                            
 
-                        db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
-                    });
+                            db_state.dispatch(DatabaseAction::AddItem(delta, new_id, new_item));
+                        });
+                    }
+                    
                 },
             }
         })

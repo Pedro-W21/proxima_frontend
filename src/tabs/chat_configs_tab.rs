@@ -64,11 +64,11 @@ pub fn chat_configs_tab() -> Html {
             
         })
     };
-    let ccs_htmls = db_state.db.configs.get_configs().iter().enumerate().map(|(id, config)| {
+    let ccs_htmls = db_state.db.configs.get_configs().iter().map(|(id, config)| {
         let callback = {
 
             let db_state = db_state.clone();
-            let id_clone = id;
+            let id_clone = *id;
             Callback::from(move |mouse_evt:MouseEvent| {
                 db_state.dispatch(DatabaseAction::SetModifiedConfig(Some(id_clone)));
                 db_state.dispatch(DatabaseAction::SetConfigSettingID(None));
@@ -78,7 +78,7 @@ pub fn chat_configs_tab() -> Html {
         if !config.access_modes.contains(&db_state.cursors.chosen_access_mode) {
             html!()
         }
-        else if db_state.cursors.config_for_modification.is_some() && id == db_state.cursors.config_for_modification.unwrap() {
+        else if db_state.cursors.config_for_modification.is_some() && *id == db_state.cursors.config_for_modification.unwrap() {
             html!(
 
                 <div><button onclick={callback} class="chat-option chosen-chat">{config.name.clone()}</button></div>
@@ -94,31 +94,36 @@ pub fn chat_configs_tab() -> Html {
     let chosen_cc_settings_htmls = match db_state.cursors.config_for_modification {
         Some(config_id) => {
             let client_db = db_state.db.clone();
-            client_db.configs.get_configs()[config_id].raw_settings.iter().enumerate().map(|(id, setting)| {
+            if let Some(config) = client_db.configs.get_configs().get(&config_id) {
+                config.raw_settings.iter().enumerate().map(|(id, setting)| {
 
-                let setting_c = setting.clone();
-                let callback = {
+                    let setting_c = setting.clone();
+                    let callback = {
 
-                    let db_state = db_state.clone();
-                    let id_clone = id;
-                    let setting_clone = setting_c.clone();
-                    Callback::from(move |mouse_evt:MouseEvent| {
-                        db_state.dispatch(DatabaseAction::SetConfigSettingID(Some(id_clone)));
-                        db_state.dispatch(DatabaseAction::SetCurrentSetting(Some(setting_clone.clone())));
-                    })
-                };
-                if db_state.cursors.chosen_setting.is_some() && id == db_state.cursors.chosen_setting.unwrap() {
-                    html!(
+                        let db_state = db_state.clone();
+                        let id_clone = id;
+                        let setting_clone = setting_c.clone();
+                        Callback::from(move |mouse_evt:MouseEvent| {
+                            db_state.dispatch(DatabaseAction::SetConfigSettingID(Some(id_clone)));
+                            db_state.dispatch(DatabaseAction::SetCurrentSetting(Some(setting_clone.clone())));
+                        })
+                    };
+                    if db_state.cursors.chosen_setting.is_some() && id == db_state.cursors.chosen_setting.unwrap() {
+                        html!(
 
-                        <div><button onclick={callback} class="chat-option chosen-chat">{setting.get_title()}</button></div>
-                    )
-                }
-                else {
-                    html!(
-                        <div><button onclick={callback} class="chat-option">{setting.get_title()}</button></div>
-                    )
-                }
-            }).collect::<Html>()
+                            <div><button onclick={callback} class="chat-option chosen-chat">{setting.get_title()}</button></div>
+                        )
+                    }
+                    else {
+                        html!(
+                            <div><button onclick={callback} class="chat-option">{setting.get_title()}</button></div>
+                        )
+                    }
+                }).collect::<Html>()
+            }
+            else {
+                html!("Config should exist by now")
+            }
         },
         None => if db_state.db.configs.get_configs().len() > 0 {
             html!({"Please pick a configuration to modify"})
@@ -213,11 +218,11 @@ pub fn chat_configs_tab() -> Html {
                         let access_mode_name = cc_setting_value_ref.cast::<web_sys::HtmlInputElement>()
                         .unwrap()
                         .value();
-                        match db_state.db.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+                        match db_state.db.access_modes.get_modes().iter().find(|(i,access_mode)| {
                             access_mode.get_name() == &access_mode_name
                         }) {
                             Some((i, access_mode)) => {
-                                ChatSetting::AccessMode(i)
+                                ChatSetting::AccessMode(*i)
                             },
                             None => panic!("What")
                         }
@@ -290,11 +295,11 @@ pub fn chat_configs_tab() -> Html {
                         let access_mode_name = cc_setting_value_ref.cast::<web_sys::HtmlInputElement>()
                         .unwrap()
                         .value();
-                        match db_state.db.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+                        match db_state.db.access_modes.get_modes().iter().find(|(i,access_mode)| {
                             access_mode.get_name() == &access_mode_name
                         }) {
                             Some((i, access_mode)) => {
-                                ChatSetting::AccessMode(i)
+                                ChatSetting::AccessMode(*i)
                             },
                             None => panic!("What")
                         }
@@ -367,11 +372,11 @@ pub fn chat_configs_tab() -> Html {
                         let access_mode_name = cc_setting_value_ref.cast::<web_sys::HtmlInputElement>()
                         .unwrap()
                         .value();
-                        match db_state.db.access_modes.get_modes().iter().enumerate().find(|(i,access_mode)| {
+                        match db_state.db.access_modes.get_modes().iter().find(|(i,access_mode)| {
                             access_mode.get_name() == &access_mode_name
                         }) {
                             Some((i, access_mode)) => {
-                                ChatSetting::AccessMode(i)
+                                ChatSetting::AccessMode(*i)
                             },
                             None => panic!("What")
                         }
@@ -387,29 +392,32 @@ pub fn chat_configs_tab() -> Html {
                 Some(config_id) => {
                     let proxima_state = proxima_state.clone();
                     spawn_local(async move {
-                        let mut config = db_state.db.configs.get_configs()[config_id].clone();
+                        if let Some(config) = db_state.db.configs.get_configs().get(&config_id) {
+                            let mut config = config.clone();
+                            match db_state.cursors.chosen_setting {
+                                Some(setting) => {
+                                    config.raw_settings[setting] = new_setting.clone();
+                                },
+                                None => {
 
-                        match db_state.cursors.chosen_setting {
-                            Some(setting) => {
-                                config.raw_settings[setting] = new_setting.clone();
-                            },
-                            None => {
-
-                                db_state.dispatch(DatabaseAction::SetConfigSettingID(Some(config.raw_settings.len())));
-                                config.raw_settings.push((new_setting.clone()));
-                            },
-                        }
-                        config.tools = Tools::try_from_settings(config.raw_settings.clone());
-                        config.last_updated = Utc::now();
-                        db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::ChatConfiguration(config_id), DatabaseItem::ChatConfig(config.clone()))]));
-                        let proxima_state = proxima_state.clone();
-                        spawn_local(async move {
-                            let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::ChatConfig(config)) };
-                            match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                Ok(response) => (),
-                                Err(()) => ()
+                                    db_state.dispatch(DatabaseAction::SetConfigSettingID(Some(config.raw_settings.len())));
+                                    config.raw_settings.push((new_setting.clone()));
+                                },
                             }
-                        });
+                            config.tools = Tools::try_from_settings(config.raw_settings.clone());
+                            config.last_updated = Utc::now();
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::ChatConfiguration(config_id), DatabaseItem::ChatConfig(config.clone()))]));
+                            let proxima_state = proxima_state.clone();
+                            spawn_local(async move {
+                                let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::ChatConfig(config.clone())) };
+                                match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                                    Ok(response) => (),
+                                    Err(()) => ()
+                                }
+                            });
+                        }
+
+                        
                     });
                 },
                 None => ()
@@ -576,7 +584,7 @@ pub fn chat_configs_tab() -> Html {
                     </div>
                 ),
                 ChatSetting::AccessMode(access_mode) => {
-                    let access_modes_htmls:Vec<Html> = db_state.db.access_modes.get_modes().iter().enumerate().map(|(id, access_mode)| {
+                    let access_modes_htmls:Vec<Html> = db_state.db.access_modes.get_modes().iter().map(|(id, access_mode)| {
                         html!(
                             <option value={access_mode.get_name().clone()}>{access_mode.get_name().clone()}</option>
                         )
@@ -624,9 +632,11 @@ pub fn chat_configs_tab() -> Html {
                     <h1>{"Configuration settings"}</h1>
                     <h2>
                     {
-                        match db_state.cursors.config_for_modification {
-                            Some(config) => html!({format!("For : {}", db_state.db.configs.get_configs()[config].name.clone())}),
-                            None => html!()
+                        if let Some(config_id) = db_state.cursors.config_for_modification && let Some(config) = db_state.db.configs.get_configs().get(&config_id) {
+                            html!({format!("For : {}", config.name.clone())})
+                        }
+                        else {
+                            html!()
                         }
                     }
                     </h2>

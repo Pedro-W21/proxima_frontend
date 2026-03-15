@@ -20,6 +20,31 @@ pub fn chat_tab() -> Html {
     let db_state = use_context::<UseReducerHandle<DatabaseState>>().expect("no ctx found");
     let prompt_node_ref = use_node_ref();
     let cc_select_ref = use_node_ref();
+    let file_ref = use_node_ref();
+
+    let chat_remove_callback = {
+        let db_state = db_state.clone();
+        let proxima_state = proxima_state.clone();
+
+        Callback::from(move |mouse_evt:MouseEvent| {
+
+            let db_state = db_state.clone();
+            let proxima_state = proxima_state.clone();
+            spawn_local(async move {
+                if let Some(chat_id) = db_state.cursors.chosen_chat {
+                    db_state.dispatch(DatabaseAction::SetChat(None));
+                    let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Remove(DatabaseItemID::Chat(chat_id)) };
+                    match make_db_request(json_request, proxima_state.chat_url.clone()).await {
+                        Ok(response) => {
+                            db_state.dispatch(DatabaseAction::RemoveItem(DatabaseItemID::Chat(chat_id)));
+                        },
+                        Err(()) => ()
+                    }
+                }
+                
+            });
+        })
+    };
 
     let prompt_send_callback = {
         let prompt = prompt_node_ref.clone();
@@ -37,14 +62,19 @@ pub fn chat_tab() -> Html {
                     let (context_part, config_opt) = match db_state.cursors.chosen_config {
                         Some(config) => {
                             chat.config = Some(config);
-                            let config_clone = db_state.db.configs.get_configs()[config].clone();
-                            chat.latest_used_config = Some(config_clone.clone());
-                            match &config_clone.tools {
-                                Some(tools) => {
-                                    (ContextPart::new_user_prompt_with_tools(vec![ContextData::Text(prompt_text)]), Some(config_clone))
-                                },
-                                None => (ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User), Some(config_clone))
+                            if let Some(config_clone) = db_state.db.configs.get_configs().get(&config) {
+                                chat.latest_used_config = Some(config_clone.clone());
+                                match &config_clone.tools {
+                                    Some(tools) => {
+                                        (ContextPart::new_user_prompt_with_tools(vec![ContextData::Text(prompt_text)]), Some(config_clone.clone()))
+                                    },
+                                    None => (ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User), Some(config_clone.clone()))
+                                }
                             }
+                            else {
+                                panic!("Impossible, config should still exist here (except if server deleted it)")
+                            }
+                            
                         },
                         None => {
                             chat.config = None;
@@ -62,12 +92,16 @@ pub fn chat_tab() -> Html {
                 None => {
                     let (starting_context, config_opt) = match db_state.cursors.chosen_config {
                         Some(config) => {
-                            let config_clone = db_state.db.configs.get_configs()[config].clone();
-                            match config_clone.tools.clone() {
-                                Some(tools) => {
-                                    (WholeContext::new_with_all_settings(vec![ContextPart::new_user_prompt_with_tools(vec![ContextData::Text(prompt_text)])], &config_clone), Some(config_clone))
-                                },
-                                None => (WholeContext::new_with_all_settings(vec![ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User)], &config_clone), Some(config_clone))
+                            if let Some(config_clone) = db_state.db.configs.get_configs().get(&config) {
+                                match config_clone.tools.clone() {
+                                    Some(tools) => {
+                                        (WholeContext::new_with_all_settings(vec![ContextPart::new_user_prompt_with_tools(vec![ContextData::Text(prompt_text)])], &config_clone), Some(config_clone.clone()))
+                                    },
+                                    None => (WholeContext::new_with_all_settings(vec![ContextPart::new(vec![ContextData::Text(prompt_text)], ContextPosition::User)], &config_clone), Some(config_clone.clone()))
+                                }
+                            }
+                            else {
+                                panic!("Impossible, config should still exist here (except if server deleted it)")
                             }
                         },
                         None => {
@@ -154,7 +188,13 @@ pub fn chat_tab() -> Html {
             let id_clone = *id;
             let db_state = db_state.clone();
             Callback::from(move |mouse_evt:MouseEvent| {
+                let db_state2 = db_state.clone();
+                spawn_local(async move {
+                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("SELECTING CHAT {id_clone} FROM {:?}", db_state2.cursors.chosen_chat)}).unwrap();
+                    invoke("print_to_console", args).await;
+                });
                 db_state.dispatch(DatabaseAction::SetChat(Some(id_clone)));
+                
             })
         };
 
@@ -174,7 +214,7 @@ pub fn chat_tab() -> Html {
         }
     }).collect::<Html>();
     let chosen_chat_by_id = db_state.db.chats.get_chats().get(&(db_state.cursors.chosen_chat.unwrap_or(1000000)));
-    let config_htmls:Vec<Html> = db_state.db.configs.get_configs().iter().enumerate().map(|(id, config)| {
+    let config_htmls:Vec<Html> = db_state.db.configs.get_configs().iter().map(|(id, config)| {
         html!(
             <option value={config.name.clone()}>{config.name.clone()}</option>
         )
@@ -187,13 +227,13 @@ pub fn chat_tab() -> Html {
             let cc_name = select_node.cast::<web_sys::HtmlInputElement>()
             .unwrap()
             .value();
-            match db_state.db.configs.get_configs().iter().enumerate().find(|(i,config)| {
+            match db_state.db.configs.get_configs().iter().find(|(i,config)| {
                 &config.name == &cc_name
             }) {
                 Some((id, config)) => {
                     let config_data = format!("{:?} {:?}", config.name.clone(), config.tools.is_some());
                     
-                    db_state.dispatch(DatabaseAction::ChangeUsedChatConfig(Some(id)));
+                    db_state.dispatch(DatabaseAction::ChangeUsedChatConfig(Some(*id)));
                     spawn_local(async move {
                         let args = serde_wasm_bindgen::to_value(&PrintArgs {value:config_data}).unwrap();
                         invoke("print_to_console", args).await;
@@ -226,15 +266,26 @@ pub fn chat_tab() -> Html {
                 </div>
             </div>
             <div class="standard-padding-margin-corners first-level most-horizontal-space vertical-flex max-height-of-container">
-                <h1>{
-                match chosen_chat_by_id {
-                    Some(chat) => match &chat.chat_title {
-                        Some(title) => title.clone(),
-                        None => format!("Untitled Chat {}", chat.id),
-                    },
-                    None => "Please select a chat or start one :)".to_string()
-                }} 
-                </h1>
+                <div>
+                    {
+                    match chosen_chat_by_id {
+                        Some(chat) => html!(
+                            <div class="chat-title-display">
+                            <h1>
+                            {
+                                match &chat.chat_title {
+                                    Some(title) => title.clone(),
+                                    None => format!("Untitled Chat {}", chat.id),
+                                }
+                            }
+                            </h1>
+                            <button class="mainapp-button standard-padding-margin-corners align-right" onclick={chat_remove_callback}>{"Delete Chat"}</button>
+                            </div>
+                        ),
+                        None => html!(<h1>{"Please select a chat or start one :)"}</h1>)
+                    }} 
+
+                </div>
                 <div class="list-holder">
                 {
                     match chosen_chat_by_id {
