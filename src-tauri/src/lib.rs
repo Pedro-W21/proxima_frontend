@@ -21,7 +21,7 @@ use proxima_backend::{
 };
 use reqwest::Response;
 use serde::{Deserialize, Serialize};
-use tauri::{async_runtime::spawn, Emitter, Manager};
+use tauri::{DragDropEvent, Emitter, Manager, PhysicalPosition, async_runtime::spawn};
 use tauri_plugin_notification::NotificationExt;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -295,6 +295,11 @@ async fn show_notification(
 fn print_to_console(state: tauri::State<ProximaState>, value: String) {
     println!("[frontend] {}", value);
 }
+#[derive(Serialize, Clone)]
+pub struct SpecialDragDrop {
+    paths:Vec<PathBuf>,
+    position:PhysicalPosition<f64>
+}
 pub struct ProximaState {
     initialized: AtomicBool,
     user_loaded: AtomicBool,
@@ -319,6 +324,16 @@ pub fn run() {
             });
             Ok(())
         })
+        .on_window_event(|window, event| 
+        match event {
+            tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, position }) => {
+                
+                window.emit("special-drag-and-drop", SpecialDragDrop { paths:paths.clone(), position: position.clone() }).unwrap();
+                println!("[backend] emitting drag drop event")
+            },
+            _ => ()
+        }
+        )
         .invoke_handler(tauri::generate_handler![
             greet,
             initialize,

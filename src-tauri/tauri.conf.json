@@ -14,8 +14,9 @@
     "windows": [
       {
         "title": "proxima_frontend",
-        "width": 800,
-        "height": 600
+        "width": 1200,
+        "height": 1000,
+        "dragDropEnabled": true
       }
     ],
     "security": {

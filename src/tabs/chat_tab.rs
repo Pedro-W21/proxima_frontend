@@ -1,3 +1,8 @@
+use std::collections::HashSet;
+use std::path::PathBuf;
+
+use futures::StreamExt;
+use gloo_events::EventListener;
 use html_parser::{Dom, Node};
 use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
@@ -5,14 +10,29 @@ use proxima_backend::database::chats::SessionType;
 use proxima_backend::database::context::{ContextData, ContextPart, ContextPosition, WholeContext};
 use proxima_backend::database::{DatabaseItem, DatabaseItemID, DatabaseRequestVariant};
 use proxima_backend::web_payloads::DBPayload;
+use serde::Deserialize;
+use tauri_sys::dpi::PhysicalPosition;
+use tauri_sys::window::DragDropEvent;
 use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlElement;
 use yew::virtual_dom::VNode;
-use yew::{AttrValue, Callback, Event, Html, MouseEvent, Properties, UseReducerHandle, function_component, html, use_context, use_node_ref, use_state_eq};
+use yew::{AttrValue, Callback, Event, Html, MouseEvent, Properties, UseReducerHandle, function_component, html, use_context, use_effect_with, use_node_ref, use_state_eq};
 
 use crate::app::{DatabaseAction, DatabaseState, PrintArgs, ProximaState, invoke, make_ai_request, make_db_request};
 use crate::db_sync::get_delta_for_add;
 
+#[derive(Deserialize, Clone)]
+pub struct SpecialDragDrop {
+    paths:Vec<PathBuf>,
+    position:PhysPos
+}
 
+
+#[derive(Deserialize, Clone)]
+pub struct PhysPos {
+    x:f64,
+    y:f64,
+}
 #[function_component(ChatTab)]
 
 pub fn chat_tab() -> Html {
@@ -21,6 +41,61 @@ pub fn chat_tab() -> Html {
     let prompt_node_ref = use_node_ref();
     let cc_select_ref = use_node_ref();
     let file_ref = use_node_ref();
+    let files_state = use_state_eq(HashSet::<PathBuf>::default);
+
+    use_effect_with(
+        files_state.clone(),
+        {
+            let div_node_ref = file_ref.clone();
+            let second_db = db_state.clone();
+            let proxima_state = proxima_state.clone();
+            let files_state = files_state.clone();
+            move |_| {
+                let mut custard_listener = None;
+
+                let db_state = second_db.clone();
+                let proxima_state = proxima_state.clone();
+                if let Some(element) = div_node_ref.cast::<HtmlElement>() {
+                    // Create your Callback as you normally would
+                    let oncustard = Callback::from(move |e: Event| {
+                        
+                    });
+                    spawn_local(async move {
+                        let listener = tauri_sys::event::listen::<SpecialDragDrop>("special-drag-and-drop").await.unwrap();
+
+                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("STARTED LISTENING FOR DRAG & DROPS")}).unwrap();
+                        invoke("print_to_console", args).await;
+                        let (mut listener, mut abort_handle) = futures::stream::abortable(listener);
+                        while let Some(raw_event) = listener.next().await {
+                            let mut current_files = (*files_state).clone();
+                            let mut new = false;
+                            for path in &raw_event.payload.paths {
+                                new = new || current_files.insert(path.clone());
+                            }
+                            if new {
+                                files_state.set(current_files);
+                                let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("RECEIVED FILE YAHOOO : {}", raw_event.payload.paths.iter().map(|path| {format!("{}", path.to_string_lossy())}).collect::<Vec<String>>().concat() )}).unwrap();
+                                invoke("print_to_console", args).await;
+                                break;
+                            }
+                        }
+                    });
+                    // Create a Closure from a Box<dyn Fn> - this has to be 'static
+                    let listener = EventListener::new(
+                        &element,
+                        "special-drag-and-drop",
+                        move |e| {
+                        
+                        }
+                    );
+
+                    custard_listener = Some(listener);
+                }
+
+                move || drop(custard_listener)
+            }
+        }
+    );
 
     let chat_remove_callback = {
         let db_state = db_state.clone();
@@ -246,6 +321,24 @@ pub fn chat_tab() -> Html {
             
         })
     };
+
+    let media_htmls = files_state.iter().enumerate().map(|(id, chat)| {
+        let files_state = files_state.clone();
+        let callback = {
+            let path = chat.clone();
+            let id_clone = id;
+            let files_state = files_state.clone();
+            Callback::from(move |mouse_evt:MouseEvent| {
+                let mut new_state = (*files_state).clone();
+                new_state.remove(&path);
+                files_state.set(new_state);
+            })
+        };
+        html!(
+
+            <div><button onclick={callback} class="chat-option chosen-chat text-left">{shorten_title_to_x_chars_from_end(chat.to_string_lossy().to_string(), 20) }</button></div>
+        )
+    }).collect::<Html>();
     html!{
         <div class="chat-part">
             <div class="standard-padding-margin-corners first-level vertical-flex max-height-of-container">
@@ -264,8 +357,26 @@ pub fn chat_tab() -> Html {
                         }
                     }
                 </div>
+                {
+                    if files_state.len() == 0 {
+                        html!()
+                    }
+                    else {
+                        html!(
+                            <div>
+                                <h1>{"Media"}</h1>
+                                <hr/>
+                            </div>
+                        )
+                    }
+                }
+                <div class="list-holder">
+                    {
+                        media_htmls
+                    }
+                </div>
             </div>
-            <div class="standard-padding-margin-corners first-level most-horizontal-space vertical-flex max-height-of-container">
+            <div class="standard-padding-margin-corners first-level most-horizontal-space vertical-flex max-height-of-container" ref={file_ref}>
                 <div>
                     {
                     match chosen_chat_by_id {
@@ -283,8 +394,7 @@ pub fn chat_tab() -> Html {
                             </div>
                         ),
                         None => html!(<h1>{"Please select a chat or start one :)"}</h1>)
-                    }} 
-
+                    }}
                 </div>
                 <div class="list-holder">
                 {
@@ -344,6 +454,22 @@ fn shorten_title_to_x_chars(title:String, max_chars:usize) -> String {
         }
         else {
             out += "...";
+            break;
+        }
+    }
+    out
+}
+
+fn shorten_title_to_x_chars_from_end(title:String, max_chars:usize) -> String {
+    let mut out = String::with_capacity(max_chars + 3);
+    let mut chars_in_out = 0;
+    for char in title.chars().rev() {
+        if chars_in_out < max_chars {
+            out.insert(0, char);
+            chars_in_out += 1;
+        }
+        else {
+            out = "...".to_string() + &out;
             break;
         }
     }

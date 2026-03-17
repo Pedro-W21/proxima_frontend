@@ -581,7 +581,7 @@ pub fn app_page() -> Html {
                         
                     });
                     spawn_local(async move {
-                        let mut listener = tauri_sys::event::listen::<(ClientUpdate, u64)>("client-update").await.unwrap();
+                        let listener = tauri_sys::event::listen::<(ClientUpdate, u64)>("client-update").await.unwrap();
 
                         let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("STARTED LISTENING FOR UPDATES")}).unwrap();
                         invoke("print_to_console", args).await;
