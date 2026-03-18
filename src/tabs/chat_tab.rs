@@ -221,29 +221,7 @@ pub fn chat_tab() -> Html {
                 let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
                 match value {
                     Ok(response) => {
-                        match response.reply {
-                            EndpointResponseVariant::Block(context_part) => {
-                                let mut chat = start_chat.clone();
-                                chat.add_to_context(context_part);
-                                let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
-                                match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                    Ok(response) => (),
-                                    Err(()) => ()
-                                }
-                                db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(chat.id), DatabaseItem::Chat(chat))]));
-                            },
-                            EndpointResponseVariant::MultiTurnBlock(whole_context) => {
-                                let mut chat = start_chat.clone();
-                                chat.context = whole_context;
-                                let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(chat.clone())) };
-                                match make_db_request(json_request, proxima_state.chat_url.clone()).await {
-                                    Ok(response) => (),
-                                    Err(()) => ()
-                                }
-                                db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(chat.id), DatabaseItem::Chat(chat))]));
-                            }
-                            _ => ()
-                        }
+                        
                     },
                     Err(_) => ()
                 }
@@ -521,6 +499,13 @@ fn context_part(prop:&ContextPartProp) -> Html {
                                 )
                             );
                         }
+                        else if elem.name == "automatic_memory" {
+                            htmls.push(
+                                html!(
+                                    <MemoryPartShow txt={elem.source_span.text.clone()}/>
+                                )
+                            );
+                        }
                         else if elem.name == "response" {
                             htmls.push(
                                 html!(
@@ -531,7 +516,8 @@ fn context_part(prop:&ContextPartProp) -> Html {
                         else if elem.source_span.text.trim().len() > 0 {
                             htmls.push(
                                 html!(
-                                    <div> 
+                                    <div>
+                                    <p>{format!("GOT HERE : {}", elem.name)}</p> 
                                     <div>{VNode::from_html_unchecked(AttrValue::from(to_html(elem.source_span.text.trim())))}</div>
                                     </div>
                                 )
@@ -755,3 +741,47 @@ fn response_part(prop:&ResponsePartProp) -> Html {
         <>{final_htmls}</>
     )
 }
+
+#[derive(Properties, PartialEq)]
+struct MemoryPartProp {
+    txt:String,
+}
+#[function_component(MemoryPartShow)]
+fn memory_part(prop:&MemoryPartProp) -> Html {
+    let should_show = use_state_eq(|| {false});
+    let callback = {
+        let should_show = should_show.clone();
+        Callback::from(move |mouse_evt:MouseEvent| {
+            if *should_show {
+                should_show.set(false);
+            }
+            else {
+                should_show.set(true);
+            }
+        })
+    };
+    let name = if *should_show {
+        format!("Automatic memory (click to hide)")
+    }
+    else {
+        format!("Automatic memory (click to show)")
+    };
+    if *should_show {
+        html!(
+            <div>
+            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+            <div>{VNode::from_html_unchecked(AttrValue::from(to_html(prop.txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat().trim())))}</div>
+            </div>
+        )
+    }
+    else {
+        html!(
+            <div>
+            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+            </div>
+        )
+    }
+}
+
+
+

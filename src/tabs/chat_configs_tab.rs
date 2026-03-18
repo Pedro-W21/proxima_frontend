@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use chrono::Utc;
 use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
-use proxima_backend::ai_interaction::tools::{AgentToolData, ProximaTool, ProximaToolData, Tools};
+use proxima_backend::ai_interaction::tools::{AgentToolData, MemoryToolMode, ProximaTool, ProximaToolData, Tools};
 use proxima_backend::database::access_modes::AccessMode;
 use proxima_backend::database::chats::SessionType;
 use proxima_backend::database::configuration::{ChatConfiguration, ChatSetting, RepeatPosition};
@@ -234,7 +234,7 @@ pub fn chat_configs_tab() -> Html {
                                 AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
                             ))),
                         "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
-                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, None),
+                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { mode: MemoryToolMode::Automatic })),
                         "Jobs" => ChatSetting::Tool(ProximaTool::Jobs, None),
                         _ => panic!("Impossible")
                     },
@@ -311,7 +311,7 @@ pub fn chat_configs_tab() -> Html {
                             )))
                         },
                         "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
-                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, None),
+                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { mode: MemoryToolMode::Automatic })),
                         "Jobs" => ChatSetting::Tool(ProximaTool::Jobs, None),
                         _ => panic!("Impossible")
                     },
@@ -388,7 +388,7 @@ pub fn chat_configs_tab() -> Html {
                                 AgentToolData::new(allocatable.iter().map(|tool| {tool.clone()}).collect())
                             ))),
                         "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
-                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, None),
+                        "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { mode: MemoryToolMode::Automatic })),
                         "Jobs" => ChatSetting::Tool(ProximaTool::Jobs, None),
                         _ => panic!("Impossible")
                     },
