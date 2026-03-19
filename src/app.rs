@@ -345,11 +345,11 @@ impl Reducible for DatabaseState {
                 if received_updates.insert(event_id) {
                     match update {
                         ClientUpdate::ItemRemoval(rem) => {
-                            mark_updated(&mut cursors, rem);
+                            mark_updated(&mut cursors, rem.clone());
                             database.remove_request(rem);
                         },
                         ClientUpdate::ItemUpdate(item_id, item) => {
-                            mark_updated(&mut cursors, item_id);
+                            mark_updated(&mut cursors, item_id.clone());
                             cursors = apply_server_updates(&mut database, vec![(item_id, item)], cursors);
                         }
                     }

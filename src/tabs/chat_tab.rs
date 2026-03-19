@@ -215,12 +215,12 @@ pub fn chat_tab() -> Html {
                         
                         let value =
                         return_val
-                        .into_serde::<([u8 ; 32], String)>();
+                        .into_serde::<(String, String)>();
 
                         if let Ok((hash, file_name)) = value {
-                            starting_context.add_part(ContextPart::new(vec![ContextData::Media(hash)], ContextPosition::User));
+                            starting_context.add_part(ContextPart::new(vec![ContextData::Media(hash.clone())], ContextPosition::User));
                             start_chat.context = starting_context.clone();
-                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Media(hash), DatabaseItem::Media(Media {hash, media_type:MediaType::Image, file_name, tags:HashSet::new(), access_modes:HashSet::from([0]), added_at:Utc::now()}, vec![]))]));
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Media(hash.clone()), DatabaseItem::Media(Media {hash, media_type:MediaType::Image, file_name, tags:HashSet::new(), access_modes:HashSet::from([0]), added_at:Utc::now()}, vec![]))]));
                         }
                     }
                     files_state.set(HashSet::new());
@@ -501,7 +501,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
         for data in prop.context_part.get_data() {
             if let ContextData::Media(hash) = data {
                 media.push(html!(
-                    <MediaPartShow hash={hash}/>
+                    <MediaPartShow hash={hash.clone()}/>
                 ));
             }
         }
@@ -825,7 +825,7 @@ fn memory_part(prop:&MemoryPartProp) -> Html {
 
 #[derive(Properties, PartialEq)]
 struct MediaPartProp {
-    hash:[u8 ; 32],
+    hash:String,
 }
 
 #[function_component(MediaPartShow)]
@@ -837,7 +837,6 @@ fn media_part(prop:&MediaPartProp) -> Html {
         let full_url = format!("{url}/media/{}", media.file_name);
         html!(
             <div>
-            <>{"AAAAAAAAa"}</>
             <img src={full_url}/>
             </div>
         )
@@ -845,7 +844,6 @@ fn media_part(prop:&MediaPartProp) -> Html {
     else {
         html!(
             <>
-            <>{"qsfQSFQSFQS"}</>
             {
                 db_state.db.media.data.iter().map(|(hash, med)| {html!(<>{format!("{:?}", hash)}</>)}).collect::<VNode>()
             }

@@ -137,7 +137,7 @@ pub fn get_next_id_for_category(db:&ProxDatabase, category:&DatabaseItem) -> Dat
         DatabaseItem::Folder(_) => DatabaseItemID::Folder(db.folders.number_of_folders()),
         DatabaseItem::Tag(_) => DatabaseItemID::Tag(db.tags.get_tags().len()),
         DatabaseItem::UserData(_) => DatabaseItemID::UserData,
-        DatabaseItem::Media(med, _) => DatabaseItemID::Media(med.hash),
+        DatabaseItem::Media(med, _) => DatabaseItemID::Media(med.hash.clone()),
         DatabaseItem::Memory(_, _) => DatabaseItemID::Memory(db.memories.last_memory_id),
         DatabaseItem::Notification(_) => DatabaseItemID::Notification(db.notifications.latest_id),
         DatabaseItem::Job(_) => DatabaseItemID::Job(db.jobs.latest_job_id),

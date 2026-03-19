@@ -7,6 +7,7 @@ use std::{
     }
 };
 
+use base64::{Engine, prelude::BASE64_STANDARD};
 use chrono::Utc;
 use futures_util::{StreamExt, TryFutureExt};
 use openai::Credentials;
@@ -62,9 +63,9 @@ async fn database_post_request(
     match response {
         Ok(data) => match data.json().await {
             Ok(data) => Ok(data),
-            Err(error) => Err(()),
+            Err(error) => {println!("[backend] error when parsing db response : {:?}", error); Err(())},
         },
-        Err(error) => Err(()),
+        Err(error) => {println!("[backend] error when receiving db response : {:?}", error); Err(())},
     }
 }
 
@@ -106,11 +107,13 @@ async fn streaming_update_task(
                 Ok(data) => {
                     let mut stream = data.bytes_stream();
                     let mut token_id: u64 = 0;
+                    let mut total_bytes = Vec::with_capacity(16384);
                     while let Some(item) = stream.next().await {
                         match item {
                             Ok(bytes) => {
-                                let u8s: Vec<u8> = bytes.to_vec();
-                                let string = String::from_utf8_lossy_owned(u8s);
+                                let mut u8s: Vec<u8> = bytes.to_vec();
+                                total_bytes.append(&mut u8s);
+                                let string = String::from_utf8_lossy_owned(total_bytes.clone());
                                 if let Ok(request_variant) =
                                     serde_json::from_str::<ClientUpdate>(&string)
                                 {
@@ -123,6 +126,7 @@ async fn streaming_update_task(
                                         .emit("client-update", (request_variant.clone(), token_id))
                                         .unwrap();
                                     token_id += 1;
+                                    total_bytes.clear();
                                 } else {
                                     dbg!("Getting invalid events : ", string);
                                 }
@@ -297,7 +301,7 @@ fn print_to_console(state: tauri::State<ProximaState>, value: String) {
 
 
 #[tauri::command(async)]
-async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, test1: PathBuf, test2:String, test3:String) -> Result<([u8 ; 32], String), ()> {
+async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, test1: PathBuf, test2:String, test3:String) -> Result<(String, String), ()> {
     println!("[backend] in add_media");
     let mut file = File::open(test1.clone()).map_err(|e| {})?;
     println!("[backend] opened file");
@@ -308,9 +312,11 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
     let mut hasher = Sha3_256::new();
     hasher.update(&bytes);
     let hash:[u8 ; 32] = hasher.finalize().into();
+    let hash = BASE64_STANDARD.encode(hash);
     println!("[backend] hashed file");
 
-    let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Get(DatabaseItemID::Media(hash)));
+
+    let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Get(DatabaseItemID::Media(hash.clone())));
     let response = reqwest::Client::new()
         .post(test2.clone())
         .json(&request)
@@ -326,16 +332,18 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
         },
         DatabaseReplyVariant::Error(DatabaseError::ItemNotFound(DatabaseItemID::Media(_))) => {
             println!("[backend] in no media branch");
-            let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Add(DatabaseItem::Media(Media { hash, media_type: MediaType::Image, file_name:test1.file_name().unwrap().to_string_lossy().to_string(), tags: HashSet::new(), access_modes: HashSet::from([0]), added_at: Utc::now() }, bytes)));
+            let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Add(DatabaseItem::Media(Media { hash:hash.clone(), media_type: MediaType::Image, file_name:test1.file_name().unwrap().to_string_lossy().to_string(), tags: HashSet::new(), access_modes: HashSet::from([0]), added_at: Utc::now() }, bytes)));
             let response = reqwest::Client::new()
                 .post(test2.clone())
                 .json(&request)
                 .send()
-                .await.map_err(|e| {})?;
+                .await.map_err(|e| {println!("[backend] error when sending : {:?}", e); })?;
+            println!("[backend] got response");
             let data = response.json::<DBResponse>().await.map_err(|e| {})?;
+            println!("[backend] decoded response");
             if let DatabaseReplyVariant::AddedItem(_) = data.reply {
                 println!("[backend] added new media");
-                let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Get(DatabaseItemID::Media(hash)));
+                let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Get(DatabaseItemID::Media(hash.clone())));
                 let response = reqwest::Client::new()
                     .post(test2.clone())
                     .json(&request)

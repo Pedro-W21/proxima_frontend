@@ -49,7 +49,7 @@ pub fn single_notification() -> Html {
     let db_state = use_context::<UseReducerHandle<DatabaseState>>().expect("no ctx found");
     let my_notification = use_context::<Notification>().expect("no ctx found");
 
-    let specific = match my_notification.related_item {
+    let specific = match my_notification.related_item.clone() {
         Some(item_id) => match item_id {
             DatabaseItemID::Chat(chat_id) => {
                 let goto_callback = {
