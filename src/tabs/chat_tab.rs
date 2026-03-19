@@ -1,16 +1,19 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use chrono::Utc;
 use futures::StreamExt;
 use gloo_events::EventListener;
+use gloo_utils::format::JsValueSerdeExt;
 use html_parser::{Dom, Node};
 use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
 use proxima_backend::database::chats::SessionType;
 use proxima_backend::database::context::{ContextData, ContextPart, ContextPosition, WholeContext};
+use proxima_backend::database::media::{Media, MediaType};
 use proxima_backend::database::{DatabaseItem, DatabaseItemID, DatabaseRequestVariant};
 use proxima_backend::web_payloads::DBPayload;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri_sys::dpi::PhysicalPosition;
 use tauri_sys::window::DragDropEvent;
 use wasm_bindgen_futures::spawn_local;
@@ -20,6 +23,13 @@ use yew::{AttrValue, Callback, Event, Html, MouseEvent, Properties, UseReducerHa
 
 use crate::app::{DatabaseAction, DatabaseState, PrintArgs, ProximaState, invoke, make_ai_request, make_db_request};
 use crate::db_sync::get_delta_for_add;
+
+#[derive(Serialize, Deserialize)]
+pub struct FileArgs {
+    test1: PathBuf,
+    test2:String, 
+    test3:String
+}
 
 #[derive(Deserialize, Clone)]
 pub struct SpecialDragDrop {
@@ -125,13 +135,14 @@ pub fn chat_tab() -> Html {
         let prompt = prompt_node_ref.clone();
         let proxima_state = proxima_state.clone();
         let db_state = db_state.clone();
+        let files_state = files_state.clone();
         Callback::from(move |mouse_evt:MouseEvent| {
             let prompt_text = prompt.cast::<web_sys::HtmlInputElement>()
             .unwrap()
             .value();
             prompt.cast::<web_sys::HtmlInputElement>()
             .unwrap().set_value("");
-            let (mut local_id, starting_context, created, start_chat, config_opt) = match (db_state.cursors.chosen_chat.clone()) {
+            let (mut local_id, mut starting_context, created, mut start_chat, config_opt) = match (db_state.cursors.chosen_chat.clone()) {
                 Some(chatid) => {
                     let mut chat = db_state.db.chats.get_chats().get(&chatid).unwrap().clone();
                     let (context_part, config_opt) = match db_state.cursors.chosen_config {
@@ -193,7 +204,27 @@ pub fn chat_tab() -> Html {
             db_state.dispatch(DatabaseAction::SetTab(1));
             let proxima_state = proxima_state.clone();
             let db_state = db_state.clone();
+            let files_state = files_state.clone();
             spawn_local(async move {
+                let files = (*files_state).clone();
+                if files.len() > 0 {
+                    for file in files {
+                        let args = serde_wasm_bindgen::to_value(&FileArgs {test1:file.clone(), test2:format!("{}/db", proxima_state.chat_url.clone()), test3:proxima_state.auth_token.clone()}).unwrap();
+
+                        let return_val = invoke("add_media_from_file_if_exists", args).await;
+                        
+                        let value =
+                        return_val
+                        .into_serde::<([u8 ; 32], String)>();
+
+                        if let Ok((hash, file_name)) = value {
+                            starting_context.add_part(ContextPart::new(vec![ContextData::Media(hash)], ContextPosition::User));
+                            start_chat.context = starting_context.clone();
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Media(hash), DatabaseItem::Media(Media {hash, media_type:MediaType::Image, file_name, tags:HashSet::new(), access_modes:HashSet::from([0]), added_at:Utc::now()}, vec![]))]));
+                        }
+                    }
+                    files_state.set(HashSet::new());
+                }
                 if created {
                     let (delta, new_id, new_item) = get_delta_for_add(
                         DatabaseItemID::Chat(local_id),
@@ -466,9 +497,18 @@ fn context_part(prop:&ContextPartProp) -> Html {
         all_text = all_text.trim().to_string();
         all_text.remove_matches("<user_prompt>");
         all_text.remove_matches("</user_prompt>");
+        let mut media = Vec::with_capacity(4);
+        for data in prop.context_part.get_data() {
+            if let ContextData::Media(hash) = data {
+                media.push(html!(
+                    <MediaPartShow hash={hash}/>
+                ));
+            }
+        }
         html!(
             <div class="standard-padding-margin-corners">
             <div> {VNode::from_html_unchecked(AttrValue::from(to_html(&all_text.lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}</div>
+            <>{media}</>
             </div>
         )
     }
@@ -783,5 +823,33 @@ fn memory_part(prop:&MemoryPartProp) -> Html {
     }
 }
 
+#[derive(Properties, PartialEq)]
+struct MediaPartProp {
+    hash:[u8 ; 32],
+}
 
-
+#[function_component(MediaPartShow)]
+fn media_part(prop:&MediaPartProp) -> Html {
+    let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
+    let db_state = use_context::<UseReducerHandle<DatabaseState>>().expect("no ctx found");
+    if let Some(media) = db_state.db.media.get_media(&prop.hash) {
+        let url = proxima_state.chat_url.clone();
+        let full_url = format!("{url}/media/{}", media.file_name);
+        html!(
+            <div>
+            <>{"AAAAAAAAa"}</>
+            <img src={full_url}/>
+            </div>
+        )
+    }
+    else {
+        html!(
+            <>
+            <>{"qsfQSFQSFQS"}</>
+            {
+                db_state.db.media.data.iter().map(|(hash, med)| {html!(<>{format!("{:?}", hash)}</>)}).collect::<VNode>()
+            }
+            </>
+        )
+    }
+}

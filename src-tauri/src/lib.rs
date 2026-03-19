@@ -2,25 +2,24 @@
 #![feature(string_from_utf8_lossy_owned)]
 
 use std::{
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpmc::{Receiver, Sender},
-        Arc, RwLock,
-    },
+    collections::HashSet, fs::File, io::Read, path::PathBuf, sync::{
+        Arc, RwLock, atomic::{AtomicBool, Ordering}, mpmc::{Receiver, Sender}
+    }
 };
 
-use futures_util::StreamExt;
+use chrono::Utc;
+use futures_util::{StreamExt, TryFutureExt};
 use openai::Credentials;
 use proxima_backend::{
     ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant},
     database::{
-        ClientUpdate, DatabaseInfoRequest, DatabaseItem, DatabaseReplyVariant, DatabaseRequestVariant, chats::ChatID, context::{ContextPart, ContextPosition}
+        ClientUpdate, DatabaseError, DatabaseInfoRequest, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, chats::ChatID, context::{ContextPart, ContextPosition}, media::{Media, MediaType}
     },
     web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse},
 };
 use reqwest::Response;
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use tauri::{DragDropEvent, Emitter, Manager, PhysicalPosition, async_runtime::spawn};
 use tauri_plugin_notification::NotificationExt;
 
@@ -116,7 +115,7 @@ async fn streaming_update_task(
                                     serde_json::from_str::<ClientUpdate>(&string)
                                 {
                                     match request_variant.clone() {
-                                        ClientUpdate::ItemUpdate(id, DatabaseItem::Tag(tag)) => {dbg!(id, tag.get_id());},
+                                        ClientUpdate::ItemUpdate(id, _) => {dbg!(id);},
                                         _ => ()
                                     }
                                     println!("[backend] emitting client update {token_id}");
@@ -295,6 +294,70 @@ async fn show_notification(
 fn print_to_console(state: tauri::State<ProximaState>, value: String) {
     println!("[frontend] {}", value);
 }
+
+
+#[tauri::command(async)]
+async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, test1: PathBuf, test2:String, test3:String) -> Result<([u8 ; 32], String), ()> {
+    println!("[backend] in add_media");
+    let mut file = File::open(test1.clone()).map_err(|e| {})?;
+    println!("[backend] opened file");
+    let mut bytes = Vec::with_capacity(4096);
+    file.read_to_end(&mut bytes).map_err(|e| {})?;
+    println!("[backend] read file");
+
+    let mut hasher = Sha3_256::new();
+    hasher.update(&bytes);
+    let hash:[u8 ; 32] = hasher.finalize().into();
+    println!("[backend] hashed file");
+
+    let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Get(DatabaseItemID::Media(hash)));
+    let response = reqwest::Client::new()
+        .post(test2.clone())
+        .json(&request)
+        .send()
+        .await.map_err(|e| {})?;
+    let data = response.json::<DBResponse>().await.map_err(|e| {})?;
+    println!("[backend] decoded DB response");
+    let file_name = match data.reply {
+        DatabaseReplyVariant::ReturnedItem(DatabaseItem::Media(med, _)) => {
+
+            println!("[backend] In existing media branch");
+            med.file_name
+        },
+        DatabaseReplyVariant::Error(DatabaseError::ItemNotFound(DatabaseItemID::Media(_))) => {
+            println!("[backend] in no media branch");
+            let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Add(DatabaseItem::Media(Media { hash, media_type: MediaType::Image, file_name:test1.file_name().unwrap().to_string_lossy().to_string(), tags: HashSet::new(), access_modes: HashSet::from([0]), added_at: Utc::now() }, bytes)));
+            let response = reqwest::Client::new()
+                .post(test2.clone())
+                .json(&request)
+                .send()
+                .await.map_err(|e| {})?;
+            let data = response.json::<DBResponse>().await.map_err(|e| {})?;
+            if let DatabaseReplyVariant::AddedItem(_) = data.reply {
+                println!("[backend] added new media");
+                let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Get(DatabaseItemID::Media(hash)));
+                let response = reqwest::Client::new()
+                    .post(test2.clone())
+                    .json(&request)
+                    .send()
+                    .await.map_err(|e| {})?;
+                let data = response.json::<DBResponse>().await.map_err(|e| {})?;
+                if let DatabaseReplyVariant::ReturnedItem(DatabaseItem::Media(mem, _)) = data.reply {
+                    mem.file_name.clone()
+                }
+                else {
+                    return Err(())
+                }
+            }
+            else {
+                return Err(())
+            }
+        },
+        _ => return Err(())
+    };
+    Ok((hash, file_name))
+}
+
 #[derive(Serialize, Clone)]
 pub struct SpecialDragDrop {
     paths:Vec<PathBuf>,
@@ -342,7 +405,8 @@ pub fn run() {
             database_post_request,
             auth_post_request,
             streaming_update_task,
-            show_notification
+            show_notification,
+            add_media_from_file_if_exists
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
