@@ -222,6 +222,10 @@ code {
 }
 
 
+.hundred-p-width {
+  max-width: 100%;
+}
+
 .fixed-80-vh {
   height:60vh;
   max-height:60vh;

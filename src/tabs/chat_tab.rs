@@ -557,7 +557,6 @@ fn context_part(prop:&ContextPartProp) -> Html {
                             htmls.push(
                                 html!(
                                     <div>
-                                    <p>{format!("GOT HERE : {}", elem.name)}</p> 
                                     <div>{VNode::from_html_unchecked(AttrValue::from(to_html(elem.source_span.text.trim())))}</div>
                                     </div>
                                 )
@@ -837,7 +836,7 @@ fn media_part(prop:&MediaPartProp) -> Html {
         let full_url = format!("{url}/media/{}", media.file_name);
         html!(
             <div>
-            <img src={full_url}/>
+            <img src={full_url} class="hundred-p-width"/>
             </div>
         )
     }
