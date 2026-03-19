@@ -10,7 +10,7 @@ use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
 use proxima_backend::database::chats::SessionType;
 use proxima_backend::database::context::{ContextData, ContextPart, ContextPosition, WholeContext};
-use proxima_backend::database::media::{Media, MediaType};
+use proxima_backend::database::media::{Base64EncodedString, Media, MediaType};
 use proxima_backend::database::{DatabaseItem, DatabaseItemID, DatabaseRequestVariant};
 use proxima_backend::web_payloads::DBPayload;
 use serde::{Deserialize, Serialize};
@@ -220,7 +220,7 @@ pub fn chat_tab() -> Html {
                         if let Ok((hash, file_name)) = value {
                             starting_context.add_part(ContextPart::new(vec![ContextData::Media(hash.clone())], ContextPosition::User));
                             start_chat.context = starting_context.clone();
-                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Media(hash.clone()), DatabaseItem::Media(Media {hash, media_type:MediaType::Image, file_name, tags:HashSet::new(), access_modes:HashSet::from([0]), added_at:Utc::now()}, vec![]))]));
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Media(hash.clone()), DatabaseItem::Media(Media {hash, media_type:MediaType::Image, file_name, tags:HashSet::new(), access_modes:HashSet::from([0]), added_at:Utc::now()}, Base64EncodedString::new(vec![])))]));
                         }
                     }
                     files_state.set(HashSet::new());

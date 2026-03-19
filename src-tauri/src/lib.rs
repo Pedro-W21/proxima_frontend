@@ -14,7 +14,7 @@ use openai::Credentials;
 use proxima_backend::{
     ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant},
     database::{
-        ClientUpdate, DatabaseError, DatabaseInfoRequest, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, chats::ChatID, context::{ContextPart, ContextPosition}, media::{Media, MediaType}
+        ClientUpdate, DatabaseError, DatabaseInfoRequest, DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant, ToolRequest, chats::ChatID, context::{ContextPart, ContextPosition}, media::{Base64EncodedString, Media, MediaType}
     },
     web_payloads::{AIPayload, AIResponse, AuthPayload, AuthResponse, DBPayload, DBResponse},
 };
@@ -128,7 +128,7 @@ async fn streaming_update_task(
                                     token_id += 1;
                                     total_bytes.clear();
                                 } else {
-                                    dbg!("Getting invalid events : ", string);
+                                    dbg!("Getting invalid events");
                                 }
                             }
                             Err(error) => {}
@@ -204,7 +204,7 @@ async fn ai_endpoint_post_request(
                                             _ => (),
                                         }
                                     } else {
-                                        dbg!("Getting invalid events : ", string);
+                                        dbg!("Getting invalid events");
                                     }
                                 }
                                 Err(error) => {}
@@ -316,7 +316,7 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
     println!("[backend] hashed file");
 
 
-    let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Get(DatabaseItemID::Media(hash.clone())));
+    let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::ToolRequest(ToolRequest::GetMediaWithoutData(hash.clone())));
     let response = reqwest::Client::new()
         .post(test2.clone())
         .json(&request)
@@ -332,7 +332,7 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
         },
         DatabaseReplyVariant::Error(DatabaseError::ItemNotFound(DatabaseItemID::Media(_))) => {
             println!("[backend] in no media branch");
-            let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Add(DatabaseItem::Media(Media { hash:hash.clone(), media_type: MediaType::Image, file_name:test1.file_name().unwrap().to_string_lossy().to_string(), tags: HashSet::new(), access_modes: HashSet::from([0]), added_at: Utc::now() }, bytes)));
+            let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Add(DatabaseItem::Media(Media { hash:hash.clone(), media_type: MediaType::Image, file_name:test1.file_name().unwrap().to_string_lossy().to_string(), tags: HashSet::new(), access_modes: HashSet::from([0]), added_at: Utc::now() }, Base64EncodedString::new(bytes))));
             let response = reqwest::Client::new()
                 .post(test2.clone())
                 .json(&request)
@@ -343,7 +343,7 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
             println!("[backend] decoded response");
             if let DatabaseReplyVariant::AddedItem(_) = data.reply {
                 println!("[backend] added new media");
-                let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Get(DatabaseItemID::Media(hash.clone())));
+                let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::ToolRequest(ToolRequest::GetMediaWithoutData(hash.clone())));
                 let response = reqwest::Client::new()
                     .post(test2.clone())
                     .json(&request)
