@@ -69,9 +69,9 @@ pub fn single_notification() -> Html {
                     None => format!("{}", chat_id) 
                 };
                 html!(
-                    <div class="label-input-combo most-horizontal-space third-level"> 
+                    <div class="label-input-combo most-horizontal-space third-level chat-title-display align-right"> 
                         <p class="standard-padding-margin-corners">{format!("Chat {} updated", chat_title)}</p>
-                        <button class="mainapp-button standard-padding-margin-corners" onclick={goto_callback}>{"Go to chat"}</button>
+                        <button class="mainapp-button standard-padding-margin-corners align-right" onclick={goto_callback}>{"Go to chat"}</button>
                     </div>
                 )
             },
@@ -122,10 +122,10 @@ pub fn single_notification() -> Html {
     };
 
     html!(
-        <div class="label-input-combo most-horizontal-space third-level standard-padding-margin-corners">
+        <div class="label-input-combo most-horizontal-space third-level standard-padding-margin-corners chat-title-display">
             <p class="standard-padding-margin-corners">{format!("{}", my_notification.timestamp)}</p>
-            <div>{specific}</div>
-            <button class="mainapp-button standard-padding-margin-corners" onclick={delete_callback}>{"Delete notification"}</button>
+            <div class="chat-title-display">{specific}</div>
+            <button class="mainapp-button standard-padding-margin-corners align-right" onclick={delete_callback}>{"Delete notification"}</button>
             
         </div>
     )

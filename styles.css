@@ -214,7 +214,6 @@ code {
   overflow-x: hidden;
   min-height:0;
   min-width: 0;
-  max-width: 90vw;
   display:block;
   flex-grow: 1;
   height: 100%;

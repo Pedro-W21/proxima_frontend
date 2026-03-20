@@ -11,6 +11,7 @@ use base64::{Engine, prelude::BASE64_STANDARD};
 use chrono::Utc;
 use futures_util::{StreamExt, TryFutureExt};
 use openai::Credentials;
+use pdfium_render::prelude::Pdfium;
 use proxima_backend::{
     ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant},
     database::{
@@ -332,7 +333,27 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
         },
         DatabaseReplyVariant::Error(DatabaseError::ItemNotFound(DatabaseItemID::Media(_))) => {
             println!("[backend] in no media branch");
-            let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Add(DatabaseItem::Media(Media { hash:hash.clone(), media_type: MediaType::Image, file_name:test1.file_name().unwrap().to_string_lossy().to_string(), tags: HashSet::new(), access_modes: HashSet::from([0]), added_at: Utc::now() }, Base64EncodedString::new(bytes))));
+            let media_type = match String::from_utf8(bytes.clone()) {
+                Ok(str) => MediaType::Text,
+                Err(_) => {
+                    println!("[backend] media not detected as text");
+                    let pdfium = Pdfium::default();
+                    let mut media_type = MediaType::Text;
+                    match pdfium.load_pdf_from_byte_slice(&bytes, None) {
+                        Ok(pdf) => {
+
+                            println!("[backend] media detected as PDF");
+                            media_type = MediaType::PDF;
+                        },
+                        Err(_) => {
+                            println!("[backend] media detected as image");
+                            media_type = MediaType::Image;
+                        }
+                    }
+                    media_type
+                }
+            };
+            let request = DBPayload::new(test3.clone(), DatabaseRequestVariant::Add(DatabaseItem::Media(Media { hash:hash.clone(), media_type, file_name:test1.file_name().unwrap().to_string_lossy().to_string(), tags: HashSet::new(), access_modes: HashSet::from([0]), added_at: Utc::now() }, Base64EncodedString::new(bytes))));
             let response = reqwest::Client::new()
                 .post(test2.clone())
                 .json(&request)

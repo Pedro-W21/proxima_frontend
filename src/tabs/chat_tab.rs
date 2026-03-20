@@ -285,7 +285,8 @@ pub fn chat_tab() -> Html {
         if !chat.access_modes.contains(&db_state.cursors.chosen_access_mode) {
             html!()
         }
-        else if db_state.cursors.chosen_chat.is_some() && *id == db_state.cursors.chosen_chat.unwrap() {
+        else if let Some(chosen_id) = db_state.cursors.chosen_chat && chosen_id == *id {
+            
             html!(
 
                 <div><button onclick={callback} class="chat-option chosen-chat text-left">{match chat.get_title() {Some(title) => shorten_title_to_x_chars(title.clone(), 20), None => format!("Chat {}", *id)}}</button></div>
@@ -297,6 +298,7 @@ pub fn chat_tab() -> Html {
             )
         }
     }).collect::<Html>();
+
     let chosen_chat_by_id = db_state.db.chats.get_chats().get(&(db_state.cursors.chosen_chat.unwrap_or(1000000)));
     let config_htmls:Vec<Html> = db_state.db.configs.get_configs().iter().map(|(id, config)| {
         html!(
@@ -330,7 +332,6 @@ pub fn chat_tab() -> Html {
             
         })
     };
-
     let media_htmls = files_state.iter().enumerate().map(|(id, chat)| {
         let files_state = files_state.clone();
         let callback = {
@@ -458,7 +459,7 @@ fn shorten_title_to_x_chars(title:String, max_chars:usize) -> String {
     let mut chars_in_out = 0;
     for char in title.chars() {
         if chars_in_out < max_chars {
-            out.insert(chars_in_out, char);
+            out.push(char);
             chars_in_out += 1;
         }
         else {
@@ -832,20 +833,25 @@ fn media_part(prop:&MediaPartProp) -> Html {
     let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
     let db_state = use_context::<UseReducerHandle<DatabaseState>>().expect("no ctx found");
     if let Some(media) = db_state.db.media.get_media(&prop.hash) {
-        let url = proxima_state.chat_url.clone();
-        let full_url = format!("{url}/media/{}", media.file_name);
-        html!(
-            <div>
-            <img src={full_url} class="hundred-p-width"/>
-            </div>
-        )
+        match media.media_type {
+            MediaType::Text => html!(<div>{format!("{}", media.file_name.clone())}</div>),
+            MediaType::PDF => html!(<div>{format!("{}", media.file_name.clone())}</div>),
+            _ => {
+                let url = proxima_state.chat_url.clone();
+                let full_url = format!("{url}/media/{}", media.file_name);
+                html!(
+                    <div>
+                    <img src={full_url} class="hundred-p-width"/>
+                    </div>
+                )
+            }
+        }
+        
     }
     else {
         html!(
             <>
-            {
-                db_state.db.media.data.iter().map(|(hash, med)| {html!(<>{format!("{:?}", hash)}</>)}).collect::<VNode>()
-            }
+            {"media not found"}
             </>
         )
     }
