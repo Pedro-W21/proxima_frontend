@@ -11,8 +11,8 @@ use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, Endp
 use proxima_backend::database::chats::{ChatID, SessionType};
 use proxima_backend::database::context::{ContextData, ContextPart, ContextPosition, WholeContext};
 use proxima_backend::database::media::{Base64EncodedString, Media, MediaType};
-use proxima_backend::database::{DatabaseItem, DatabaseItemID, DatabaseRequestVariant};
-use proxima_backend::web_payloads::DBPayload;
+use proxima_backend::database::{DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant};
+use proxima_backend::web_payloads::{DBPayload, DBResponse};
 use serde::{Deserialize, Serialize};
 use tauri_sys::dpi::PhysicalPosition;
 use tauri_sys::window::DragDropEvent;
@@ -897,9 +897,54 @@ struct MediaPartProp {
 fn media_part(prop:&MediaPartProp) -> Html {
     let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
     let db_state = use_context::<UseReducerHandle<DatabaseState>>().expect("no ctx found");
+    let media_data = use_state_eq(|| {Base64EncodedString::new(vec![])});
+    let should_show = use_state_eq(|| {false});
     if let Some(media) = db_state.db.media.get_media(&prop.hash) {
         match media.media_type {
-            MediaType::Text => html!(<div>{format!("{}", media.file_name.clone())}</div>),
+            MediaType::Text => {
+                let hash = media.hash.clone();
+                let media_data2 = media_data.clone();
+                spawn_local(async move {
+                    match make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Get(DatabaseItemID::Media(hash)) },proxima_state.chat_url.clone()).await {
+                        Ok(DBResponse { reply:DatabaseReplyVariant::ReturnedItem(DatabaseItem::Media(_, data)) }) => media_data2.set(data),
+                        _ => ()
+                    }
+                });
+                let callback = {
+                    let should_show = should_show.clone();
+                    Callback::from(move |mouse_evt:MouseEvent| {
+                        if *should_show {
+                            should_show.set(false);
+                        }
+                        else {
+                            should_show.set(true);
+                        }
+                    })
+                };
+                let name = if *should_show {
+                    format!("File {} (click to hide)",  media.file_name.clone())
+                }
+                else {
+                    format!("File {} (click to show)",  media.file_name.clone())
+                };
+                if *should_show {
+                    let string = String::from_utf8(media_data.get_data()).unwrap();
+                    html!(
+                        <div>
+                            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+                            <>{VNode::from_html_unchecked(AttrValue::from(to_html(string.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat().trim())))}</>
+                        </div>
+                    )
+                }
+                else {
+                    html!(
+                        <div>
+                            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+                        </div>
+                    )
+                }
+                
+            },
             MediaType::PDF => html!(<div>{format!("{}", media.file_name.clone())}</div>),
             _ => {
                 let url = proxima_state.chat_url.clone();
