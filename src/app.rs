@@ -245,6 +245,7 @@ pub struct DatabaseState {
     pub update_flipper:bool,
     pub token_streams:HashMap<ChatID, StreamingData>,
     pub received_updates:HashSet<u64>,
+    pub ongoing_chats:HashSet<ChatID>
 }
 
 #[derive(Clone, PartialEq)]
@@ -262,7 +263,8 @@ impl Default for DatabaseState {
             cursors:UserCursors::zero(),
             update_flipper:false,
             token_streams:HashMap::with_capacity(16),
-            received_updates:HashSet::with_capacity(128)
+            received_updates:HashSet::with_capacity(128),
+            ongoing_chats:HashSet::with_capacity(16),
         }
     }
 }
@@ -298,6 +300,12 @@ pub enum DatabaseAction {
     ApplyClientUpdate {
         update:ClientUpdate,
         event_id:u64
+    },
+    AddToOngoingChats {
+        chat:ChatID,
+    },
+    RemoveFromOngoingChats {
+        chat:ChatID
     }
 }
 
@@ -309,6 +317,7 @@ impl Reducible for DatabaseState {
         let mut update_flipper = self.update_flipper;
         let mut token_streams = self.token_streams.clone();
         let mut received_updates = self.received_updates.clone();
+        let mut ongoing_chats = self.ongoing_chats.clone();
         let now = Utc::now();
         let mut to_remove = Vec::with_capacity(2);
         for (chat_id, stream) in &mut token_streams {
@@ -426,10 +435,12 @@ impl Reducible for DatabaseState {
                         None => ()
                     }
                 });
-            }
+            },
+            DatabaseAction::AddToOngoingChats { chat } => {ongoing_chats.insert(chat);},
+            DatabaseAction::RemoveFromOngoingChats { chat } => {ongoing_chats.remove(&chat);}
 
         }
-        DatabaseState{db:database, cursors, update_flipper, token_streams, received_updates}.into()
+        DatabaseState{db:database, cursors, update_flipper, token_streams, received_updates, ongoing_chats}.into()
     }
 }
 

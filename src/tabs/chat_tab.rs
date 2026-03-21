@@ -8,7 +8,7 @@ use gloo_utils::format::JsValueSerdeExt;
 use html_parser::{Dom, Node};
 use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
-use proxima_backend::database::chats::SessionType;
+use proxima_backend::database::chats::{ChatID, SessionType};
 use proxima_backend::database::context::{ContextData, ContextPart, ContextPosition, WholeContext};
 use proxima_backend::database::media::{Base64EncodedString, Media, MediaType};
 use proxima_backend::database::{DatabaseItem, DatabaseItemID, DatabaseRequestVariant};
@@ -218,7 +218,18 @@ pub fn chat_tab() -> Html {
                         .into_serde::<(String, String)>();
 
                         if let Ok((hash, file_name)) = value {
-                            starting_context.add_part(ContextPart::new(vec![ContextData::Media(hash.clone())], ContextPosition::User));
+                            let mut last_user = None;
+                            for (i,part) in starting_context.get_parts().iter().enumerate() {
+                                if let ContextPosition::User = part.get_position() {
+                                    last_user = Some(i);
+                                }
+                            }
+                            if let Some(i) = last_user {
+                                starting_context.get_parts_mut()[i].add_data(ContextData::Media(hash.clone()));
+                            }
+                            else {
+                                starting_context.add_part(ContextPart::new(vec![ContextData::Media(hash.clone())], ContextPosition::User));
+                            }
                             start_chat.context = starting_context.clone();
                             db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Media(hash.clone()), DatabaseItem::Media(Media {hash, media_type:MediaType::Image, file_name, tags:HashSet::new(), access_modes:HashSet::from([0]), added_at:Utc::now()}, Base64EncodedString::new(vec![])))]));
                         }
@@ -243,6 +254,7 @@ pub fn chat_tab() -> Html {
                 else {
                     db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(local_id), DatabaseItem::Chat(start_chat.clone()))]));
                 }
+                db_state.dispatch(DatabaseAction::AddToOngoingChats { chat: local_id });
 
                 let streaming = true;
 
@@ -250,6 +262,7 @@ pub fn chat_tab() -> Html {
 
 
                 let value = make_ai_request(json_request, proxima_state.chat_url.clone(), local_id).await;
+                db_state.dispatch(DatabaseAction::RemoveFromOngoingChats { chat: local_id });
                 match value {
                     Ok(response) => {
                         
@@ -410,10 +423,10 @@ pub fn chat_tab() -> Html {
                 {
                     match chosen_chat_by_id {
                         Some(chat) => {
-                            chat.context.get_parts().iter().map(|context_part| {
+                            chat.context.get_parts().iter().enumerate().map(|(i, context_part)| {
                                 if context_part.in_visible_position() {
                                     html!(
-                                        <ContextPartShow context_part={context_part.clone()}/>
+                                        <ContextPartShow context_part={context_part.clone()} context_part_index={i} chat_id={chat.get_id()} deletable={!db_state.ongoing_chats.contains(&chat.get_id())}/>
                                         
                                     )
                                 }
@@ -486,13 +499,61 @@ fn shorten_title_to_x_chars_from_end(title:String, max_chars:usize) -> String {
     out
 }
 
-#[derive(Properties, PartialEq)]
+#[derive(Clone, Properties, PartialEq)]
 pub struct ContextPartProp {
-    context_part:ContextPart
+    context_part:ContextPart,
+    chat_id:ChatID,
+    context_part_index:usize,
+    deletable:bool
 }
 
 #[function_component(ContextPartShow)]
 fn context_part(prop:&ContextPartProp) -> Html {
+
+    let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
+    let db_state = use_context::<UseReducerHandle<DatabaseState>>().expect("no ctx found");
+    let delete_part_callback = {
+        let db_state = db_state.clone();
+        let proxima_state = proxima_state.clone();
+        let prop = prop.clone();
+        Callback::from(move |mouse_evt:MouseEvent| {
+            let mut new_chat = db_state.db.chats.get_chats().get(&prop.chat_id).unwrap().clone();
+            new_chat.context.get_parts_mut().remove(prop.context_part_index);
+            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Chat(new_chat.get_id()), DatabaseItem::Chat(new_chat.clone()))]));
+            let proxima_state = proxima_state.clone();
+            spawn_local(async move {
+                make_db_request(DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::Chat(new_chat)) }, proxima_state.chat_url.clone()).await;
+            });
+        })
+    };
+    let pos_add = html!(
+        <>
+        {
+            match prop.context_part.get_position() {
+                ContextPosition::User => "User",
+                ContextPosition::Tool(_) => "Tool",
+                ContextPosition::AI => "AI",
+                ContextPosition::System => "System",
+                ContextPosition::Total => "Total"
+            }
+        }
+        </>
+    );
+    let part_title_add = if prop.deletable {
+        html!(
+            <div class="chat-title-display">
+                <>{pos_add}</>
+                <button class="mainapp-button standard-padding-margin-corners align-right" onclick={delete_part_callback}>{"Delete part"}</button>
+            </div>
+        )
+    }
+    else {
+        html!(
+            <div class="chat-title-display">
+                {pos_add}
+            </div>
+        )
+    };
     let mut all_text = prop.context_part.data_to_single_text();
     if prop.context_part.is_user() {
         all_text = all_text.trim().to_string();
@@ -508,6 +569,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
         }
         html!(
             <div class="standard-padding-margin-corners">
+            <>{part_title_add}</>
             <div> {VNode::from_html_unchecked(AttrValue::from(to_html(&all_text.lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}</div>
             <>{media}</>
             </div>
@@ -579,6 +641,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
                 if htmls.len() > 0 {
                     html!(
                         <div class="standard-padding-margin-corners nonuser-turn">
+                        <>{part_title_add}</>
                         <div>{htmls}</div>
                         </div>
                     )
@@ -590,6 +653,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
             Err(_) => if all_text.contains("<think>") {
                 html!(
                     <div class="standard-padding-margin-corners nonuser-turn">
+                    <>{part_title_add}</>
                     <ThinkingPartShow txt={all_text} finished=false/>
                     </div>
                 )
@@ -598,6 +662,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
 
                 html!(
                     <div class="standard-padding-margin-corners nonuser-turn">
+                    <>{part_title_add}</>
                     <div> {VNode::from_html_unchecked(AttrValue::from(to_html(all_text.trim())))}</div>
                     </div>
                 )
