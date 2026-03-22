@@ -215,9 +215,9 @@ pub fn chat_tab() -> Html {
                         
                         let value =
                         return_val
-                        .into_serde::<(String, String)>();
+                        .into_serde::<(String, String, MediaType)>();
 
-                        if let Ok((hash, file_name)) = value {
+                        if let Ok((hash, file_name, media_type)) = value {
                             let mut last_user = None;
                             for (i,part) in starting_context.get_parts().iter().enumerate() {
                                 if let ContextPosition::User = part.get_position() {
@@ -231,7 +231,7 @@ pub fn chat_tab() -> Html {
                                 starting_context.add_part(ContextPart::new(vec![ContextData::Media(hash.clone())], ContextPosition::User));
                             }
                             start_chat.context = starting_context.clone();
-                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Media(hash.clone()), DatabaseItem::Media(Media {hash, media_type:MediaType::Image, file_name, tags:HashSet::new(), access_modes:HashSet::from([0]), added_at:Utc::now()}, Base64EncodedString::new(vec![])))]));
+                            db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Media(hash.clone()), DatabaseItem::Media(Media {hash, media_type, file_name, tags:HashSet::new(), access_modes:HashSet::from([0]), added_at:Utc::now()}, Base64EncodedString::new(vec![])))]));
                         }
                     }
                     files_state.set(HashSet::new());
@@ -393,7 +393,7 @@ pub fn chat_tab() -> Html {
                         )
                     }
                 }
-                <div class="list-holder">
+                <div class={if files_state.len() > 0 {"list-holder"} else {""}}>
                     {
                         media_htmls
                     }

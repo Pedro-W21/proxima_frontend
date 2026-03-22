@@ -302,7 +302,7 @@ fn print_to_console(state: tauri::State<ProximaState>, value: String) {
 
 
 #[tauri::command(async)]
-async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, test1: PathBuf, test2:String, test3:String) -> Result<(String, String), ()> {
+async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, test1: PathBuf, test2:String, test3:String) -> Result<(String, String, MediaType), ()> {
     println!("[backend] in add_media");
     let mut file = File::open(test1.clone()).map_err(|e| {})?;
     println!("[backend] opened file");
@@ -325,11 +325,11 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
         .await.map_err(|e| {})?;
     let data = response.json::<DBResponse>().await.map_err(|e| {})?;
     println!("[backend] decoded DB response");
-    let file_name = match data.reply {
+    let (file_name, media_type) = match data.reply {
         DatabaseReplyVariant::ReturnedItem(DatabaseItem::Media(med, _)) => {
 
             println!("[backend] In existing media branch");
-            med.file_name
+            (med.file_name, med.media_type)
         },
         DatabaseReplyVariant::Error(DatabaseError::ItemNotFound(DatabaseItemID::Media(_))) => {
             println!("[backend] in no media branch");
@@ -372,7 +372,7 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
                     .await.map_err(|e| {})?;
                 let data = response.json::<DBResponse>().await.map_err(|e| {})?;
                 if let DatabaseReplyVariant::ReturnedItem(DatabaseItem::Media(mem, _)) = data.reply {
-                    mem.file_name.clone()
+                    (mem.file_name.clone(), mem.media_type.clone())
                 }
                 else {
                     return Err(())
@@ -384,7 +384,7 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
         },
         _ => return Err(())
     };
-    Ok((hash, file_name))
+    Ok((hash, file_name, media_type))
 }
 
 #[derive(Serialize, Clone)]
