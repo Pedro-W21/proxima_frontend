@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use chrono::Utc;
 use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
-use proxima_backend::ai_interaction::tools::{AgentToolData, MemoryToolMode, ProximaTool, ProximaToolData, Tools};
+use proxima_backend::ai_interaction::tools::{AgentToolData, MemoryToolMode, ProximaTool, ProximaToolData, TimeToolMode, Tools};
 use proxima_backend::database::access_modes::AccessMode;
 use proxima_backend::database::chats::SessionType;
 use proxima_backend::database::configuration::{ChatConfiguration, ChatSetting, RepeatPosition};
@@ -236,6 +236,7 @@ pub fn chat_configs_tab() -> Html {
                         "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
                         "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { mode: MemoryToolMode::Automatic })),
                         "Jobs" => ChatSetting::Tool(ProximaTool::Jobs, None),
+                        "Time" => ChatSetting::Tool(ProximaTool::Time, Some(ProximaToolData::Time { mode: TimeToolMode::Automatic { after_user: true, after_ai: true, after_tools: false } })),
                         _ => panic!("Impossible")
                     },
                     ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -313,6 +314,7 @@ pub fn chat_configs_tab() -> Html {
                         "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
                         "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { mode: MemoryToolMode::Automatic })),
                         "Jobs" => ChatSetting::Tool(ProximaTool::Jobs, None),
+                        "Time" => ChatSetting::Tool(ProximaTool::Time, Some(ProximaToolData::Time { mode: TimeToolMode::Automatic { after_user: true, after_ai: true, after_tools: false } })),
                         _ => panic!("Impossible")
                     },
                     ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -390,6 +392,7 @@ pub fn chat_configs_tab() -> Html {
                         "RNG" => ChatSetting::Tool(ProximaTool::Rng, None),
                         "Memory" => ChatSetting::Tool(ProximaTool::Memory, Some(ProximaToolData::Memory { mode: MemoryToolMode::Automatic })),
                         "Jobs" => ChatSetting::Tool(ProximaTool::Jobs, None),
+                        "Time" => ChatSetting::Tool(ProximaTool::Time, Some(ProximaToolData::Time { mode: TimeToolMode::Automatic { after_user: true, after_ai: true, after_tools: false } })),
                         _ => panic!("Impossible")
                     },
                     ChatSetting::MaxContextLength(length) => ChatSetting::MaxContextLength(cc_setting_value_ref.cast::<web_sys::HtmlInputElement>().unwrap().value().parse().unwrap()),
@@ -566,6 +569,7 @@ pub fn chat_configs_tab() -> Html {
                                         <option value={"RNG"}>{"RNG"}</option>
                                         <option value={"Memory"}>{"Memory"}</option>
                                         <option value={"Jobs"}>{"Jobs"}</option>
+                                        <option value={"Time"}>{"Time"}</option>
                                     </select>
                                     <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" onclick={add_tool_callback}>{"Add"}</button>
                                     <div class="list-holder">
@@ -592,6 +596,7 @@ pub fn chat_configs_tab() -> Html {
                                 <option value={"RNG"}>{"RNG"}</option>
                                 <option value={"Memory"}>{"Memory"}</option>
                                 <option value={"Jobs"}>{"Jobs"}</option>
+                                <option value={"Time"}>{"Time"}</option>
                             </select>
                             {addition}
                         </div>

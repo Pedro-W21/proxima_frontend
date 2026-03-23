@@ -542,7 +542,8 @@ fn context_part(prop:&ContextPartProp) -> Html {
     let part_title_add = if prop.deletable {
         html!(
             <div class="chat-title-display">
-                <>{pos_add}</>
+                <div>{pos_add}</div>
+                <div>{if let Some(date) = prop.context_part.get_date() {format!("{date}")} else {"".to_string()}}</div>
                 <button class="mainapp-button standard-padding-margin-corners align-right" onclick={delete_part_callback}>{"Delete part"}</button>
             </div>
         )
@@ -550,7 +551,8 @@ fn context_part(prop:&ContextPartProp) -> Html {
     else {
         html!(
             <div class="chat-title-display">
-                {pos_add}
+                <div>{pos_add}</div>
+                <div>{if let Some(date) = prop.context_part.get_date() {format!("{date}")} else {"".to_string()}}</div>
             </div>
         )
     };
@@ -613,6 +615,15 @@ fn context_part(prop:&ContextPartProp) -> Html {
                             htmls.push(
                                 html!(
                                     <ResponsePartShow children={elem.children.clone()}/>
+                                )
+                            );
+                        }
+                        else if elem.name == "current_time" {
+                            htmls.push(
+                                html!(
+                                    <>
+                                    {"(Current time context addition)"}
+                                    </>
                                 )
                             );
                         }
