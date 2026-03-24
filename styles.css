@@ -85,6 +85,15 @@ tr td {
   border: 1px solid transparent;
 }
 
+.mainapp-unused-button {
+  background-color:#2d4720;
+  box-shadow: none;
+  text-shadow: none;
+  border: 1px solid transparent;
+  color: #848484;
+
+}
+
 .chat-option {
   border-radius: 8px;
   background-color: #1a5800;

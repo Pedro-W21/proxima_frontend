@@ -125,21 +125,19 @@ pub fn initialize_page() -> Html {
                     Ok(_) => (),
                     Err(error) => {
                         let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("{:?}", error)}).unwrap();
-                        invoke("print_to_console", args).await;
+                        print(format!("{:?}", error)).await;
                     }
                 }
 
                 let value = value;
-                let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("Got a response from the server")}).unwrap();
-                invoke("print_to_console", args).await;
+                print("Got a response from the server").await;
                 match value {
                     Ok(response) => {
                         let args2: JsValue = serde_wasm_bindgen::to_value(&StreamingUpdateRequest {test:response.session_token.clone(), test2:local_ai_url.clone() + "/db"}).unwrap();
                         invoke("streaming_update_task", args2).await;
 
 
-                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("Started notification task")}).unwrap();
-                        invoke("print_to_console", args).await;
+                        print("Started notification task").await;
 
                         second_clone.dispatch(ProximaStateAction::ChangeAuthToken(response.session_token.clone()));
                         second_clone.dispatch(ProximaStateAction::ChangeDeviceID(response.device_id));
@@ -166,9 +164,6 @@ pub fn initialize_page() -> Html {
                     },
                     Err(_) => ()
                 }
-
-                let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("AAAAAAAAAAA")}).unwrap();
-                invoke("print_to_console", args).await;
 
             });
         })
@@ -444,6 +439,11 @@ impl Reducible for DatabaseState {
     }
 }
 
+pub async fn print<T:ToString>(print:T) {
+    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:print.to_string()}).unwrap();
+    invoke("print_to_console", args).await;
+}
+
 fn mark_updated(cursors:&mut UserCursors, db_id:DatabaseItemID) {
     let index = match db_id {
         DatabaseItemID::Chat(_) => 1,
@@ -508,8 +508,7 @@ pub fn app_page() -> Html {
                     spawn_local(async move {
                         let mut listener = tauri_sys::event::listen::<(EndpointResponseVariant, ChatID, u64)>("chat-token").await.unwrap();
 
-                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("STARTED LISTENING")}).unwrap();
-                        invoke("print_to_console", args).await;
+                        print("started listening").await;
                         let (mut listener, mut abort_handle) = futures::stream::abortable(listener);
                         while let Some(raw_event) = listener.next().await {
 
@@ -518,14 +517,12 @@ pub fn app_page() -> Html {
                             let chat_id = raw_event.payload.1;
                             let token_id = raw_event.payload.2;
 
-                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S FOR CHAT_ID {chat_id} | CHAT LEN {} | EVENT ID {}", db_state.db.chats.get_chats().len(), raw_event.id)}).unwrap();
-                            invoke("print_to_console", args).await;
+                            print(format!("IT'S FOR CHAT_ID {chat_id} | CHAT LEN {} | EVENT ID {}", db_state.db.chats.get_chats().len(), raw_event.id)).await;
 
                             match event {
                                 EndpointResponseVariant::StartStream(data, position) => {
 
-                                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S A START STREAM EVENT")}).unwrap();
-                                    invoke("print_to_console", args).await;
+                                    print("It's a start stream event").await;
                                     db_state.dispatch(DatabaseAction::AddPartToChat{
                                         chat_id,
                                         token_id,
@@ -533,8 +530,7 @@ pub fn app_page() -> Html {
                                     });
                                 },
                                 EndpointResponseVariant::ContinueStream(data, position) => {
-                                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S A CONTINUE STREAM EVENT")}).unwrap();
-                                    invoke("print_to_console", args).await;
+                                    print("It's a continue stream event").await;
                                     db_state.dispatch(DatabaseAction::AddDataToLastPartOfChat {
                                         chat_id,
                                         token_id,
@@ -544,20 +540,16 @@ pub fn app_page() -> Html {
                                      
                                 },
                                 EndpointResponseVariant::EndStream(data, position) => {
-                                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S A END STREAM EVENT")}).unwrap();
-                                    invoke("print_to_console", args).await;
+                                    print("It's a end stream event").await;
                                     panic!("Odd, not supposed to get that yet");
                                 },
                                 _ => {
-
-                                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("IT'S AN IMPOSSIBLE STREAM EVENT")}).unwrap();
-                                    invoke("print_to_console", args).await;
+                                    print("It's an impossible stream event").await;
                                     panic!("Impossible to get that here")
                                 }
                             }
 
-                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("FINISHED EVENT YAHOOO")}).unwrap();
-                            invoke("print_to_console", args).await;
+                            print("Finished chat streaming event").await;
                         }
                     });
                     // Create a Closure from a Box<dyn Fn> - this has to be 'static
@@ -594,8 +586,7 @@ pub fn app_page() -> Html {
                     spawn_local(async move {
                         let listener = tauri_sys::event::listen::<(ClientUpdate, u64)>("client-update").await.unwrap();
 
-                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("STARTED LISTENING FOR UPDATES")}).unwrap();
-                        invoke("print_to_console", args).await;
+                        print("Started listening for updates").await;
                         let (mut listener, mut abort_handle) = futures::stream::abortable(listener);
                         while let Some(raw_event) = listener.next().await {
                             let event = raw_event.payload.0;
@@ -610,8 +601,7 @@ pub fn app_page() -> Html {
                             }
                             db_state.dispatch(DatabaseAction::ApplyClientUpdate { update: event, event_id });
 
-                            let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("FINISHED EVENT YAHOOO")}).unwrap();
-                            invoke("print_to_console", args).await;
+                            print("Finished processing backend event").await;
                         }
                     });
                     // Create a Closure from a Box<dyn Fn> - this has to be 'static
@@ -725,11 +715,6 @@ pub fn app_page() -> Html {
                     }
                     
                     db_state.dispatch(DatabaseAction::SetGlobalAM(*id));
-                    spawn_local(async move {
-                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:access_mode_name_clone}).unwrap();
-                        invoke("print_to_console", args).await;
-
-                    });
                 },
                 None => ()
             }

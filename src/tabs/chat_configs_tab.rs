@@ -204,10 +204,6 @@ pub fn chat_configs_tab() -> Html {
                             "AI" => ContextPosition::AI,
                             val => {
                                 let value = val.to_string();
-                                spawn_local(async move {
-                                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("got {}", value)}).unwrap();
-                                    invoke("print_to_console", args).await;
-                                });
                                 ContextPosition::User
                         },
                         }

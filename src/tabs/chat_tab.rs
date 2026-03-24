@@ -21,7 +21,7 @@ use web_sys::HtmlElement;
 use yew::virtual_dom::VNode;
 use yew::{AttrValue, Callback, Event, Html, MouseEvent, Properties, UseReducerHandle, function_component, html, use_context, use_effect_with, use_node_ref, use_state_eq};
 
-use crate::app::{DatabaseAction, DatabaseState, PrintArgs, ProximaState, invoke, make_ai_request, make_db_request};
+use crate::app::{DatabaseAction, DatabaseState, PrintArgs, ProximaState, invoke, make_ai_request, make_db_request, print};
 use crate::db_sync::get_delta_for_add;
 
 #[derive(Serialize, Deserialize)]
@@ -73,8 +73,7 @@ pub fn chat_tab() -> Html {
                     spawn_local(async move {
                         let listener = tauri_sys::event::listen::<SpecialDragDrop>("special-drag-and-drop").await.unwrap();
 
-                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("STARTED LISTENING FOR DRAG & DROPS")}).unwrap();
-                        invoke("print_to_console", args).await;
+                        print("STARTED LISTENING FOR DRAG AND DROP").await;
                         let (mut listener, mut abort_handle) = futures::stream::abortable(listener);
                         while let Some(raw_event) = listener.next().await {
                             let mut current_files = (*files_state).clone();
@@ -84,8 +83,7 @@ pub fn chat_tab() -> Html {
                             }
                             if new {
                                 files_state.set(current_files);
-                                let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("RECEIVED FILE YAHOOO : {}", raw_event.payload.paths.iter().map(|path| {format!("{}", path.to_string_lossy())}).collect::<Vec<String>>().concat() )}).unwrap();
-                                invoke("print_to_console", args).await;
+                                print("RECEIVED FILE YAHOO").await;
                                 break;
                             }
                         }
@@ -286,10 +284,6 @@ pub fn chat_tab() -> Html {
             let db_state = db_state.clone();
             Callback::from(move |mouse_evt:MouseEvent| {
                 let db_state2 = db_state.clone();
-                spawn_local(async move {
-                    let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("SELECTING CHAT {id_clone} FROM {:?}", db_state2.cursors.chosen_chat)}).unwrap();
-                    invoke("print_to_console", args).await;
-                });
                 db_state.dispatch(DatabaseAction::SetChat(Some(id_clone)));
                 
             })
@@ -334,8 +328,7 @@ pub fn chat_tab() -> Html {
                     
                     db_state.dispatch(DatabaseAction::ChangeUsedChatConfig(Some(*id)));
                     spawn_local(async move {
-                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:config_data}).unwrap();
-                        invoke("print_to_console", args).await;
+                        print(config_data).await;
                     });
                 },
                 None => {
@@ -362,6 +355,17 @@ pub fn chat_tab() -> Html {
             <div><button onclick={callback} class="chat-option chosen-chat text-left">{shorten_title_to_x_chars_from_end(chat.to_string_lossy().to_string(), 20) }</button></div>
         )
     }).collect::<Html>();
+    let (disabled, button_style) = if let Some(chat_id) = db_state.cursors.chosen_chat {
+        if db_state.ongoing_chats.contains(&chat_id) {
+            (true, "mainapp-unused-button standard-padding-margin-corners")
+        }
+        else {
+            (false, "mainapp-button standard-padding-margin-corners")
+        }
+    } else {
+        (false, "mainapp-button standard-padding-margin-corners")
+    };
+
     html!{
         <div class="chat-part">
             <div class="standard-padding-margin-corners first-level vertical-flex max-height-of-container">
@@ -456,7 +460,7 @@ pub fn chat_tab() -> Html {
                         <option value="NO CHAT CONFIG WHATSOEVER (please do not use this magic name for a real chat config)">{"None"}</option>
                         {config_htmls}
                     </select>
-                    <button class="mainapp-button standard-padding-margin-corners" onclick={prompt_send_callback}>{"Send"}</button>
+                    <button class={button_style} onclick={prompt_send_callback} disabled={disabled}>{"Send"}</button>
                     
                 </div>
 
@@ -539,23 +543,20 @@ fn context_part(prop:&ContextPartProp) -> Html {
         }
         </>
     );
-    let part_title_add = if prop.deletable {
-        html!(
-            <div class="chat-title-display">
-                <div>{pos_add}</div>
-                <div>{if let Some(date) = prop.context_part.get_date() {format!("{date}")} else {"".to_string()}}</div>
-                <button class="mainapp-button standard-padding-margin-corners align-right" onclick={delete_part_callback}>{"Delete part"}</button>
-            </div>
-        )
+    let (disabled, button_style) = if prop.deletable {
+        (false, "mainapp-button standard-padding-margin-corners align-right")
     }
     else {
+        (true, "mainapp-unused-button standard-padding-margin-corners align-right")
+    };
+    let part_title_add = 
         html!(
             <div class="chat-title-display">
                 <div>{pos_add}</div>
                 <div>{if let Some(date) = prop.context_part.get_date() {format!("{date}")} else {"".to_string()}}</div>
+                <button class={button_style} disabled={disabled} onclick={delete_part_callback}>{"Delete part"}</button>
             </div>
-        )
-    };
+        );
     let mut all_text = prop.context_part.data_to_single_text();
     if prop.context_part.is_user() {
         all_text = all_text.trim().to_string();
