@@ -8,7 +8,7 @@ use gloo_utils::format::JsValueSerdeExt;
 use html_parser::{Dom, Node};
 use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
-use proxima_backend::database::chats::{ChatID, SessionType};
+use proxima_backend::database::chats::{Chat, ChatID, SessionType};
 use proxima_backend::database::context::{ContextData, ContextPart, ContextPosition, WholeContext};
 use proxima_backend::database::media::{Base64EncodedString, Media, MediaType};
 use proxima_backend::database::{DatabaseItem, DatabaseItemID, DatabaseReplyVariant, DatabaseRequestVariant};
@@ -23,6 +23,7 @@ use yew::{AttrValue, Callback, Event, Html, MouseEvent, Properties, UseReducerHa
 
 use crate::app::{DatabaseAction, DatabaseState, PrintArgs, ProximaState, invoke, make_ai_request, make_db_request, print};
 use crate::db_sync::get_delta_for_add;
+use crate::html_parsing::{HtmlNode, parse_html};
 
 #[derive(Serialize, Deserialize)]
 pub struct FileArgs {
@@ -43,6 +44,36 @@ pub struct PhysPos {
     x:f64,
     y:f64,
 }
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum SortingMode {
+    None,
+    AscendingID,
+    DescendingID,
+    AscendingTime,
+    DescendingTime
+}
+
+impl SortingMode {
+    pub fn get_next(&self) -> SortingMode {
+        match self {
+            Self::None => Self::AscendingID,
+            Self::AscendingID => Self::DescendingID,
+            Self::DescendingID => Self::AscendingTime,
+            Self::AscendingTime => Self::DescendingTime,
+            Self::DescendingTime => Self::None
+        }
+    }
+    pub fn get_title(&self) -> String {
+        match self {
+            Self::None => "Nothing".to_string(),
+            Self::AscendingID => "Ascending ID".to_string(),
+            Self::DescendingID => "Descending ID".to_string(),
+            Self::AscendingTime => "Ascending time".to_string(),
+            Self::DescendingTime => "Descending time".to_string()
+        }
+    }
+}
 #[function_component(ChatTab)]
 
 pub fn chat_tab() -> Html {
@@ -52,6 +83,7 @@ pub fn chat_tab() -> Html {
     let cc_select_ref = use_node_ref();
     let file_ref = use_node_ref();
     let files_state = use_state_eq(HashSet::<PathBuf>::default);
+    let sort_state = use_state_eq(|| {SortingMode::None});
 
     use_effect_with(
         files_state.clone(),
@@ -277,10 +309,25 @@ pub fn chat_tab() -> Html {
             db_state.dispatch(DatabaseAction::SetChat(None));
         })
     };
-    let chat_htmls = db_state.db.chats.get_chats().iter().map(|(id, chat)| {
+    let sort_callback = {
+        let sort_state = sort_state.clone();
+        Callback::from(move |mouse_evt:MouseEvent| {
+            sort_state.set(sort_state.get_next());
+        })
+    };
+    let sort_title = sort_state.get_title();
+    let mut chat_refs = db_state.db.chats.get_chats().iter().collect::<Vec<(&ChatID, &Chat)>>();
+    match *sort_state {
+        SortingMode::None => (),
+        SortingMode::AscendingTime => chat_refs.sort_by(|(_,chat1), (_,chat2)| {chat1.latest_message.cmp(&chat2.latest_message)}),
+        SortingMode::DescendingTime => chat_refs.sort_by(|(_,chat1), (_,chat2)| {chat2.latest_message.cmp(&chat1.latest_message)}),
+        SortingMode::AscendingID => chat_refs.sort_by(|(_,chat1), (_,chat2)| {chat1.id.cmp(&chat2.id)}),
+        SortingMode::DescendingID => chat_refs.sort_by(|(_,chat1), (_,chat2)| {chat2.id.cmp(&chat1.id)}),
+    };
+    let chat_htmls = chat_refs.iter().map(|(id, chat)| {
         let db_state = db_state.clone();
         let callback = {
-            let id_clone = *id;
+            let id_clone = **id;
             let db_state = db_state.clone();
             Callback::from(move |mouse_evt:MouseEvent| {
                 let db_state2 = db_state.clone();
@@ -292,7 +339,7 @@ pub fn chat_tab() -> Html {
         if !chat.access_modes.contains(&db_state.cursors.chosen_access_mode) {
             html!()
         }
-        else if let Some(chosen_id) = db_state.cursors.chosen_chat && chosen_id == *id {
+        else if let Some(chosen_id) = db_state.cursors.chosen_chat && chosen_id == **id {
             
             html!(
 
@@ -371,7 +418,13 @@ pub fn chat_tab() -> Html {
             <div class="standard-padding-margin-corners first-level vertical-flex max-height-of-container">
                 <div>
                     <h1>{"Past chats"}</h1>
-                    <button class="mainapp-button most-horizontal-space-no-flex standard-padding-margin-corners" onclick={new_chat_callback}>{"New chat"}</button>
+                    <div class="horizontal-flex">
+                        <button class="mainapp-button most-horizontal-space standard-padding-margin-corners" onclick={new_chat_callback}>{"New chat"}</button>
+                    </div>
+                    <div class="horizontal-flex">
+                        <button class="mainapp-button most-horizontal-space standard-padding-margin-corners" onclick={sort_callback}>{format!("Sort by : {sort_title}")}</button>
+                    </div>
+
                     <hr/>
                 </div>
                 <div class="list-holder">
@@ -579,106 +632,113 @@ fn context_part(prop:&ContextPartProp) -> Html {
         )
     }
     else {
-        match Dom::parse(&all_text) {
-            Ok(dom) => {
-                let mut htmls = Vec::with_capacity(dom.children.len());
-                for child in dom.children {
-                    if let Some(elem) = child.element() {
-                        if elem.name == "think" {
-                            htmls.push(
-                                html!(
-                                    <ThinkingPartShow txt={elem.source_span.text.clone()} finished=true/>
-                                )
-                            );
-                        }
-                        else if elem.name == "call" && elem.children.len() >= 3 && let Some(tool_child) = elem.children[0].element() && tool_child.children.len() > 0 && let Some(tool_name) = tool_child.children[0].text() {
-                            htmls.push(
-                                html!(
-                                    <CallPartShow txt={elem.source_span.text.clone()} tool_name={tool_name.to_string()} finished=true/>
-                                )
-                            );
-                        }
-                        else if elem.name == "outputs" {
-                            htmls.push(
-                                html!(
-                                    <CallOutputPartShow txt={elem.source_span.text.clone()}/>
-                                )
-                            );
-                        }
-                        else if elem.name == "automatic_memory" {
-                            htmls.push(
-                                html!(
-                                    <MemoryPartShow txt={elem.source_span.text.clone()}/>
-                                )
-                            );
-                        }
-                        else if elem.name == "response" {
-                            htmls.push(
-                                html!(
-                                    <ResponsePartShow children={elem.children.clone()}/>
-                                )
-                            );
-                        }
-                        else if elem.name == "current_time" {
-                            htmls.push(
-                                html!(
-                                    <>
-                                    {"(Current time context addition)"}
-                                    </>
-                                )
-                            );
-                        }
-                        else if elem.source_span.text.trim().len() > 0 {
-                            htmls.push(
-                                html!(
-                                    <div>
-                                    <div>{VNode::from_html_unchecked(AttrValue::from(to_html(elem.source_span.text.trim())))}</div>
-                                    </div>
-                                )
-                                
-                            );
-                        }
-                    }
-                    else if let Some(txt) = child.text() && txt.trim().len() > 0 {
+        let parsed = parse_html(&all_text.chars().collect::<Vec<char>>(), 2);
+        if parsed.has_elements() {
+            let mut htmls = Vec::with_capacity(parsed.children.len());
+            for child in parsed.children {
+                if let HtmlNode::Element { name, content, children } = child {
+                    if name == "think" {
                         htmls.push(
                             html!(
-                                <div> 
-                                    <div>{VNode::from_html_unchecked(AttrValue::from(to_html(&txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}</div>
+                                <ThinkingPartShow txt={content} finished=true/>
+                            )
+                        );
+                    }
+                    else if name == "call" && children.len() >= 3 && let HtmlNode::Element { name:child_name, content:child_content, children:tool_children } = &children[0] && child_name.trim() == "tool" {
+                        let child_content = child_content.clone();
+                        htmls.push(
+                            
+                            html!(
+                                <CallPartShow txt={content.clone()} tool_name={child_content.trim().to_string()} finished=true/>
+                            )
+                        );
+                    }
+                    else if name == "outputs" {
+                        htmls.push(
+                            html!(
+                                <CallOutputPartShow txt={content}/>
+                            )
+                        );
+                    }
+                    else if name == "automatic_memory" {
+                        htmls.push(
+                            html!(
+                                <MemoryPartShow txt={content}/>
+                            )
+                        );
+                    }
+                    else if name == "response" {
+                        htmls.push(
+                            html!(
+                                <ResponsePartShow children={children}/>
+                            )
+                        );
+                    }
+                    else if name == "current_time" {
+                        htmls.push(
+                            html!(
+                                <>
+                                {"(Current time context addition)"}
+                                </>
+                            )
+                        );
+                    }
+                    else if content.trim().len() > 0 {
+                        htmls.push(
+                            html!(
+                                <div>
+                                <>{name}</>
+                                <div>{VNode::from_html_unchecked(AttrValue::from(to_html(content.trim())))}</div>
                                 </div>
                             )
                             
                         );
                     }
                 }
-                if htmls.len() > 0 {
-                    html!(
-                        <div class="standard-padding-margin-corners nonuser-turn">
-                        <>{part_title_add}</>
-                        <div>{htmls}</div>
-                        </div>
-                    )
+                else if let HtmlNode::Text(txt) = child && txt.trim().len() > 0 {
+                    htmls.push(
+                        html!(
+                            <div> 
+                                <div>{VNode::from_html_unchecked(AttrValue::from(to_html(&txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}</div>
+                            </div>
+                        )
+                        
+                    );
                 }
-                else {
-                    html!()
-                }
-            },
-            Err(_) => if all_text.contains("<think>") {
+            }
+            if htmls.len() > 0 {
                 html!(
                     <div class="standard-padding-margin-corners nonuser-turn">
                     <>{part_title_add}</>
-                    <ThinkingPartShow txt={all_text} finished=false/>
-                    </div>
-                )
-            } 
-            else {
-
-                html!(
-                    <div class="standard-padding-margin-corners nonuser-turn">
-                    <>{part_title_add}</>
-                    <div> {VNode::from_html_unchecked(AttrValue::from(to_html(all_text.trim())))}</div>
+                    <div>{htmls}</div>
                     </div>
                 )
             }
+            else {
+                html!()
+            }
+        }
+        else if all_text.contains("<think>") {
+            html!(
+                <div class="standard-padding-margin-corners nonuser-turn">
+                <>{part_title_add}</>
+                <ThinkingPartShow txt={all_text} finished=false/>
+                </div>
+            )
+        } 
+        else if all_text.trim().len() > 0 {
+
+            html!(
+                <div class="standard-padding-margin-corners nonuser-turn">
+                <>{part_title_add}</>
+                <div> {VNode::from_html_unchecked(AttrValue::from(to_html(all_text.trim())))}</div>
+                </div>
+            )
+        }
+        else {
+            html!(
+                
+            )
         }
     }
 }
@@ -719,19 +779,27 @@ fn thinking_part(prop:&ThinkingPartProp) -> Html {
             format!("Thinking... (click to show)")
         }
     };
-    if *should_show {
-        html!(
-            <div>
-            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
-            <div>{VNode::from_html_unchecked(AttrValue::from(to_html(prop.txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat().trim())))}</div>
-            </div>
-        )
+    if prop.txt.trim().len() > 0 {
+        if *should_show {
+            html!(
+                <div>
+                <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+                <div>{VNode::from_html_unchecked(AttrValue::from(to_html(prop.txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat().trim())))}</div>
+                </div>
+            )
+        }
+        else {
+            html!(
+                <div>
+                <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
+                </div>
+            )
+        }
+
     }
     else {
         html!(
-            <div>
-            <button class="mainapp-button standard-padding-margin-corners" onclick={callback}>{name}</button>
-            </div>
+
         )
     }
 }
@@ -833,20 +901,20 @@ fn call_output_part(prop:&CallOutputPartProp) -> Html {
 
 #[derive(Properties, PartialEq)]
 struct ResponsePartProp {
-    children:Vec<Node>,
+    children:Vec<HtmlNode>,
 }
 #[function_component(ResponsePartShow)]
 fn response_part(prop:&ResponsePartProp) -> Html {
     let mut final_htmls = Vec::with_capacity(prop.children.len());
     for child in &prop.children {
-        if let Some(elem) = child.element() && elem.name == "think" {
+        if let HtmlNode::Element { name, content, children } = child && name == "think" {
             final_htmls.push(
                 html!(
-                    <ThinkingPartShow txt={elem.source_span.text.clone()} finished=true/>
+                    <ThinkingPartShow txt={content.clone()} finished=true/>
                 )
             );
         }
-        else if let Some(txt) = child.text() {
+        else if let HtmlNode::Text(txt) = child {
             final_htmls.push(html!(
                 <div> 
                     <div>{VNode::from_html_unchecked(AttrValue::from(to_html(&txt.trim().lines().intersperse("\n\n").collect::<Vec<&str>>().concat())))}</div>

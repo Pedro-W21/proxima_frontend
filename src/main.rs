@@ -3,6 +3,7 @@
 mod app;
 mod db_sync;
 mod tabs;
+mod html_parsing;
 
 use app::App;
 
