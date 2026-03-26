@@ -287,7 +287,7 @@ pub fn chat_tab() -> Html {
                 }
                 db_state.dispatch(DatabaseAction::AddToOngoingChats { chat: local_id });
 
-                let streaming = true;
+                let streaming = config_opt.as_ref().is_some_and(|conf| {conf.is_streaming()});
 
                 let json_request = proxima_backend::web_payloads::AIPayload::new(proxima_state.auth_token.clone(), EndpointRequestVariant::RespondToFullPrompt { whole_context: starting_context, streaming, session_type: SessionType::Chat, chat_settings:config_opt, chat_id:Some(local_id), access_mode:db_state.cursors.chosen_access_mode });
 

@@ -161,7 +161,7 @@ pub fn parse_html(chars:&[char], max_depth:usize) -> ParsedHtml {
                     }
                     else {
                         let (tag_name, start_tag_len) = state.tag_name();
-                        let slice = &chars[(start_ind+start_tag_len+2)..(end_ind-tag_name.len()-3)];
+                        let slice = &chars[(start_ind+start_tag_len+2)..(end_ind-tag_name.len()-2)];
                         let inside_str = chars_to_string(slice);
                         let parsed = parse_html(slice, max_depth-1);
                         children.push(HtmlNode::Element { name: chars_to_string(&tag_name), content: inside_str, children:parsed.children });

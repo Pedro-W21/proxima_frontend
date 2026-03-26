@@ -178,6 +178,7 @@ pub fn chat_configs_tab() -> Html {
                 "Max context length" => Some(ChatSetting::MaxContextLength(10000)),
                 "Max response length" => Some(ChatSetting::ResponseTokenLimit(10000)),
                 "Tool" => Some(ChatSetting::Tool(ProximaTool::Calculator, None)),
+                "Token streaming" => Some(ChatSetting::TokenStreaming),
                 _ => None
             }));
         })
@@ -250,6 +251,7 @@ pub fn chat_configs_tab() -> Html {
                             None => panic!("What")
                         }
                     },
+                    ChatSetting::TokenStreaming => ChatSetting::TokenStreaming,
                     _ => panic!("Setting doesn't exist in UI")
                 },
                 None => {
@@ -328,6 +330,7 @@ pub fn chat_configs_tab() -> Html {
                             None => panic!("What")
                         }
                     },
+                    ChatSetting::TokenStreaming => ChatSetting::TokenStreaming,
                     _ => panic!("Setting doesn't exist in UI")
                 },
                 None => {
@@ -406,6 +409,7 @@ pub fn chat_configs_tab() -> Html {
                             None => panic!("What")
                         }
                     },
+                    ChatSetting::TokenStreaming => ChatSetting::TokenStreaming,
                     _ => panic!("Setting doesn't exist in UI")
                 },
                 None => {
@@ -625,6 +629,13 @@ pub fn chat_configs_tab() -> Html {
                             </select>
                         </div>
                     )
+                },
+                ChatSetting::TokenStreaming => {
+                    html!(
+                        <p class="second-level standard-padding-margin-corners">
+                            {"This setting enables token streaming from the backend. Instead of getting a chat response all at once, you're getting each chat token as it is being generated. If you do not need it (for example because you won't be waiting on a response instantly) disabling it is best as it increases client performance."}
+                        </p>
+                    )
                 }
                 _ => html!({"unsupported access mode"})
             },
@@ -678,6 +689,7 @@ pub fn chat_configs_tab() -> Html {
                         <option value={"Max context length"}>{"Max context length"}</option>
                         <option value={"Max response length"}>{"Max response length"}</option>
                         <option value={"Tool"}>{"Tool"}</option>
+                        <option value={"Token streaming"}>{"Token streaming"}</option>
                     </select>
                     <hr/>
                 </div>
