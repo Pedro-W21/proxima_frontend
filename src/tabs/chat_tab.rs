@@ -83,7 +83,7 @@ pub fn chat_tab() -> Html {
     let prompt_node_ref = use_node_ref();
     let cc_select_ref = use_node_ref();
     let file_ref = use_node_ref();
-    let files_state = use_state_eq(HashSet::<PathBuf>::default);
+    let files_state = use_state_eq(Vec::<PathBuf>::default);
     let sort_state = use_state_eq(|| {SortingMode::None});
 
     use_effect_with(
@@ -112,7 +112,11 @@ pub fn chat_tab() -> Html {
                             let mut current_files = (*files_state).clone();
                             let mut new = false;
                             for path in &raw_event.payload.paths {
-                                new = new || current_files.insert(path.clone());
+                                if !current_files.contains(path) {
+                                    current_files.push(path.clone());
+                                    new = true;
+                                } 
+                                
                             }
                             if new {
                                 files_state.set(current_files);
@@ -265,7 +269,7 @@ pub fn chat_tab() -> Html {
                             db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::Media(hash.clone()), DatabaseItem::Media(Media {hash, media_type, file_name, tags:HashSet::new(), access_modes:HashSet::from([0]), added_at:Utc::now()}, Base64EncodedString::new(vec![])))]));
                         }
                     }
-                    files_state.set(HashSet::new());
+                    files_state.set(Vec::new());
                 }
                 if created {
                     let (delta, new_id, new_item) = get_delta_for_add(
@@ -394,7 +398,7 @@ pub fn chat_tab() -> Html {
             let files_state = files_state.clone();
             Callback::from(move |mouse_evt:MouseEvent| {
                 let mut new_state = (*files_state).clone();
-                new_state.remove(&path);
+                new_state.remove(new_state.iter().enumerate().find(|(i, p)| {**p == path}).map_or(0, |(i, p)| {i}));
                 files_state.set(new_state);
             })
         };
