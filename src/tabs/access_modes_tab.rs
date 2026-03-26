@@ -23,7 +23,8 @@ struct SettingsReducer {
 }
 
 enum SettingsAction {
-    UpdateSetting(String, AMSetting)
+    UpdateSetting(String, AMSetting),
+    UpdateWhole(HashMap<String , AMSetting>)
 }
 
 impl Reducible for SettingsReducer {
@@ -31,7 +32,8 @@ impl Reducible for SettingsReducer {
     fn reduce(self: std::rc::Rc<Self>, action: Self::Action) -> std::rc::Rc<Self> {
         let mut new_settings = self.settings.clone();
         match action {
-            SettingsAction::UpdateSetting(setting, new_val) => {new_settings.insert(setting, new_val);}
+            SettingsAction::UpdateSetting(setting, new_val) => {new_settings.insert(setting, new_val);},
+            SettingsAction::UpdateWhole(whole) => new_settings = whole,
         }
         Rc::new(SettingsReducer { settings: new_settings })
     }
@@ -60,11 +62,13 @@ pub fn access_modes_tab() -> Html {
         let callback = {
 
             let db_state = db_state.clone();
+            let current_settings = current_settings.clone();
             let id_clone = *id;
             Callback::from(move |mouse_evt:MouseEvent| {
                 db_state.dispatch(DatabaseAction::SetModifiedAM(Some(id_clone)));
                 if let Some(mode) = db_state.db.access_modes.get_modes().get(&id_clone) {
                     db_state.dispatch(DatabaseAction::SetTagsForAM(mode.get_tags().clone()));
+                    current_settings.dispatch(SettingsAction::UpdateWhole(mode.am_settings.clone()));
                 }
             })
         };
