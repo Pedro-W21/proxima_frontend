@@ -34,6 +34,11 @@
   text-align: left;
 }
 
+.inline-item {
+  display:inline-block;
+  margin-right:10px;
+}
+
 html,
 body {
   margin: 0;

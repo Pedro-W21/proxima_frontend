@@ -1,25 +1,58 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
-use proxima_backend::database::access_modes::AccessMode;
+use proxima_backend::database::access_modes::{AMSetting, AccessMode};
 use proxima_backend::database::chats::SessionType;
 use proxima_backend::database::context::{ContextData, ContextPart, ContextPosition, WholeContext};
 use proxima_backend::database::{DatabaseItem, DatabaseItemID, DatabaseRequestVariant};
 use proxima_backend::web_payloads::DBPayload;
 use wasm_bindgen_futures::spawn_local;
 use yew::virtual_dom::VNode;
-use yew::{AttrValue, Callback, Event, Html, MouseEvent, UseReducerHandle, function_component, html, use_context, use_node_ref};
+use yew::ContextProvider;
+use yew::{AttrValue, Callback, Event, Html, MouseEvent, Properties, Reducible, UseReducerHandle, function_component, html, use_context, use_node_ref, use_reducer_eq};
 
 use crate::app::{DatabaseAction, DatabaseState, PrintArgs, ProximaState, invoke, make_ai_request, make_db_request};
 use crate::db_sync::{get_delta_for_add, get_next_id_for_category};
 
 
+#[derive(Clone, PartialEq)]
+struct SettingsReducer {
+    settings:HashMap<String, AMSetting>
+}
+
+enum SettingsAction {
+    UpdateSetting(String, AMSetting)
+}
+
+impl Reducible for SettingsReducer {
+    type Action = SettingsAction;
+    fn reduce(self: std::rc::Rc<Self>, action: Self::Action) -> std::rc::Rc<Self> {
+        let mut new_settings = self.settings.clone();
+        match action {
+            SettingsAction::UpdateSetting(setting, new_val) => {new_settings.insert(setting, new_val);}
+        }
+        Rc::new(SettingsReducer { settings: new_settings })
+    }
+}
 
 #[function_component(AccessModesTab)]
 pub fn access_modes_tab() -> Html {
     let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
     let db_state = use_context::<UseReducerHandle<DatabaseState>>().expect("no ctx found");
+    let db_state2 = db_state.clone();
+    let current_settings = use_reducer_eq(|| {
+        match db_state2.cursors.access_mode_for_modification {
+            Some(am) => if let Some(access_mode) = db_state2.db.access_modes.get_modes().get(&am) {
+                SettingsReducer {settings:access_mode.am_settings.clone()}
+            }
+            else {
+                SettingsReducer {settings:HashMap::new()}
+            },
+            None => SettingsReducer {settings:HashMap::new()}
+        }
+    });
 
     let am_name_ref = use_node_ref();
 
@@ -29,7 +62,7 @@ pub fn access_modes_tab() -> Html {
             let db_state = db_state.clone();
             let id_clone = *id;
             Callback::from(move |mouse_evt:MouseEvent| {
-                db_state.dispatch(DatabaseAction::SetModifiedAM(None));
+                db_state.dispatch(DatabaseAction::SetModifiedAM(Some(id_clone)));
                 if let Some(mode) = db_state.db.access_modes.get_modes().get(&id_clone) {
                     db_state.dispatch(DatabaseAction::SetTagsForAM(mode.get_tags().clone()));
                 }
@@ -106,6 +139,7 @@ pub fn access_modes_tab() -> Html {
         let db_state = db_state.clone();
         let proxima_state = proxima_state.clone();
         let am_name_ref = am_name_ref.clone();
+        let settings = current_settings.clone();
         Callback::from(move |mouse_evt:MouseEvent| {
             let mut db_state = db_state.clone();
             
@@ -119,6 +153,7 @@ pub fn access_modes_tab() -> Html {
                         let mut am = am.clone();
                         am.name = am_name;
                         am.tags = db_state.cursors.chosen_access_mode_tags.clone();
+                        am.am_settings = settings.settings.clone();
                         db_state.dispatch(DatabaseAction::ApplyUpdates(vec![(DatabaseItemID::AccessMode(am_id), DatabaseItem::AccessMode(am.clone()))]));
                         let proxima_state = proxima_state.clone();
                         spawn_local(async move {
@@ -131,7 +166,7 @@ pub fn access_modes_tab() -> Html {
                     }
                 },
                 None => {
-                    let am = AccessMode::new(0, db_state.cursors.chosen_access_mode_tags.clone(), am_name);
+                    let am = AccessMode::new(0, db_state.cursors.chosen_access_mode_tags.clone(), am_name).with_settings(settings.settings.clone());
                     let id = get_next_id_for_category(&db_state.db, &DatabaseItem::AccessMode(am.clone()));
                     let proxima_state = proxima_state.clone();
 
@@ -224,6 +259,17 @@ pub fn access_modes_tab() -> Html {
                         </table>
                     </div>
                     
+                    <div class="third-level standard-padding-margin-corners vertical-flex max-height-of-container">
+                        <h2>
+                            {"UI settings"}
+                        </h2>
+                        <div>
+                            <ContextProvider<UseReducerHandle<SettingsReducer>> context={current_settings.clone()}>
+                                <SettingCheck setting_name={"Hide time tool"}/>
+                            </ContextProvider<UseReducerHandle<SettingsReducer>>>
+
+                        </div>
+                    </div>
                 </div>
 
                 <div class="label-input-combo bottom-bar most-horizontal-space-no-flex">
@@ -239,4 +285,32 @@ pub fn access_modes_tab() -> Html {
             </div>
         </div>
     }
+}
+
+#[derive(Properties, PartialEq)]
+struct SettingProps {
+    setting_name:String,
+
+}
+
+#[function_component(SettingCheck)]
+fn thinking_part(prop:&SettingProps) -> Html {
+    let db_state = use_context::<UseReducerHandle<DatabaseState>>().expect("no ctx found");
+    let current_settings = use_context::<UseReducerHandle<SettingsReducer>>().expect("no ctx found");
+    let enabled = match current_settings.settings.get(&prop.setting_name) {
+        Some(AMSetting::Bool(val)) => *val,
+        _ => false
+    };
+    let callback = {
+        let setting_name = prop.setting_name.clone();
+        Callback::from(move |mouse_evt:MouseEvent| {
+            current_settings.dispatch(SettingsAction::UpdateSetting(setting_name.clone(), AMSetting::Bool(!enabled)));
+        })
+    };
+    html!(
+        <div>
+            <input class="inline-item" type="checkbox" checked={enabled} onclick={callback}/>
+            <p class="inline-item">{prop.setting_name.clone()}</p>
+        </div>
+    )
 }

@@ -8,6 +8,7 @@ use gloo_utils::format::JsValueSerdeExt;
 use html_parser::{Dom, Node};
 use markdown::to_html;
 use proxima_backend::ai_interaction::endpoint_api::{EndpointRequestVariant, EndpointResponseVariant};
+use proxima_backend::database::access_modes::AMSetting;
 use proxima_backend::database::chats::{Chat, ChatID, SessionType};
 use proxima_backend::database::context::{ContextData, ContextPart, ContextPosition, WholeContext};
 use proxima_backend::database::media::{Base64EncodedString, Media, MediaType};
@@ -413,6 +414,20 @@ pub fn chat_tab() -> Html {
         (false, "mainapp-button standard-padding-margin-corners")
     };
 
+    let ui_settings = if let Some(access_mode) = db_state.db.access_modes.get_modes().get(&db_state.cursors.chosen_access_mode) {
+        ChatUISettings {
+            hide_time_tool: if let Some(AMSetting::Bool(val)) = access_mode.am_settings.get(&"Hide time tool".to_string()) {
+                *val
+            }
+            else {
+                false
+            }
+        }
+    }
+    else {
+        ChatUISettings { hide_time_tool: false }
+    };
+
     html!{
         <div class="chat-part">
             <div class="standard-padding-margin-corners first-level vertical-flex max-height-of-container">
@@ -483,7 +498,7 @@ pub fn chat_tab() -> Html {
                             chat.context.get_parts().iter().enumerate().map(|(i, context_part)| {
                                 if context_part.in_visible_position() {
                                     html!(
-                                        <ContextPartShow context_part={context_part.clone()} context_part_index={i} chat_id={chat.get_id()} deletable={!db_state.ongoing_chats.contains(&chat.get_id())}/>
+                                        <ContextPartShow context_part={context_part.clone()} context_part_index={i} chat_id={chat.get_id()} deletable={!db_state.ongoing_chats.contains(&chat.get_id())} ui_settings={ui_settings.clone()}/>
                                         
                                     )
                                 }
@@ -561,7 +576,8 @@ pub struct ContextPartProp {
     context_part:ContextPart,
     chat_id:ChatID,
     context_part_index:usize,
-    deletable:bool
+    deletable:bool,
+    ui_settings:ChatUISettings
 }
 
 #[function_component(ContextPartShow)]
@@ -675,13 +691,15 @@ fn context_part(prop:&ContextPartProp) -> Html {
                         );
                     }
                     else if name == "current_time" {
-                        htmls.push(
-                            html!(
-                                <>
-                                {"(Current time context addition)"}
-                                </>
+                        if !prop.ui_settings.hide_time_tool {
+                            htmls.push(
+                                html!(
+                                    <>
+                                    {"(Current time context addition)"}
+                                    </>
+                                )
                             )
-                        );
+                        }
                     }
                     else if content.trim().len() > 0 {
                         htmls.push(
@@ -737,7 +755,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
         }
         else {
             html!(
-                
+
             )
         }
     }
@@ -747,6 +765,11 @@ fn context_part(prop:&ContextPartProp) -> Html {
 struct ThinkingPartProp {
     txt:String,
     finished:bool
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ChatUISettings {
+    hide_time_tool:bool
 }
 
 #[function_component(ThinkingPartShow)]
