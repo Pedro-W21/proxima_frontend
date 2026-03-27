@@ -664,7 +664,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
                             )
                         );
                     }
-                    else if name == "call" && children.len() >= 3 && let HtmlNode::Element { name:child_name, content:child_content, children:tool_children } = &children[0] && child_name.trim() == "tool" {
+                    else if name == "call" && children.children.len() >= 3 && let Some(HtmlNode::Element { name:child_name, content:child_content, children:tool_children }) = &children.get_first_element() && child_name.trim() == "tool" {
                         let child_content = child_content.clone();
                         htmls.push(
                             
@@ -690,7 +690,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
                     else if name == "response" {
                         htmls.push(
                             html!(
-                                <ResponsePartShow children={children}/>
+                                <ResponsePartShow children={children.children}/>
                             )
                         );
                     }

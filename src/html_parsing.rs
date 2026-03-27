@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct ParsedHtml {
     pub children:Vec<HtmlNode>
 }
@@ -13,6 +14,15 @@ impl ParsedHtml {
         }
         false
     }
+    pub fn get_first_element(&self) -> Option<HtmlNode> {
+
+        for child in &self.children {
+            if let HtmlNode::Element { name, content, children } = child {
+                return Some(child.clone())
+            }
+        }
+        None
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
@@ -21,7 +31,7 @@ pub enum HtmlNode {
     Element{
         name:String,
         content:String,
-        children:Vec<HtmlNode>
+        children:ParsedHtml
     }
 }
 
@@ -41,11 +51,11 @@ impl ParserState {
     pub fn next_state(self, cur_char:char) -> Self {
         match self {
             Self::Start => match cur_char {
-                '<' => Self::ParsingTagName{name:vec![]},
+                '<' => Self::ParsingTagName{name:Vec::with_capacity(16)},
                 _ => Self::ReadingText
             },
             Self::ReadingText => match cur_char {
-                '<' => Self::ParsingTagName{name:vec![]},
+                '<' => Self::ParsingTagName{name:Vec::with_capacity(16)},
                 _ => Self::ReadingText
             },
             Self::ParsingTagName{name:current_name} => match cur_char {
@@ -69,7 +79,7 @@ impl ParserState {
                 _ => Self::SearchingTagEnd { tag_name, total_start_len, open_counter }
             },
             Self::ParsingTagClose { tag_name, total_start_len, open_counter } => match cur_char {
-                '/' => Self::ParsingTagEnd { tag_name, actual_name: vec![], total_start_len, open_counter },
+                '/' => Self::ParsingTagEnd { tag_name, actual_name: Vec::with_capacity(16), total_start_len, open_counter },
                 _ => Self::ParsingInsideTagOpening { tag_name, total_start_len, open_counter, actual_name: vec![cur_char] }
             }
             Self::ParsingTagEnd { tag_name, actual_name, total_start_len, open_counter } => match cur_char {
@@ -147,7 +157,7 @@ fn chars_to_string(chars:&[char]) -> String {
 
 pub fn parse_html(chars:&[char], max_depth:usize) -> ParsedHtml {
     if max_depth > 0 {
-        let mut start_ind = 0;
+        let mut start_ind: usize = 0;
         let mut end_ind = 0;
         if chars.len() > 0 {
             let mut children = Vec::with_capacity(4);
@@ -161,10 +171,10 @@ pub fn parse_html(chars:&[char], max_depth:usize) -> ParsedHtml {
                     }
                     else {
                         let (tag_name, start_tag_len) = state.tag_name();
-                        let slice = &chars[(start_ind+start_tag_len+2)..(end_ind-tag_name.len()-2)];
+                        let slice = &chars[(start_ind+start_tag_len+1)..(end_ind-tag_name.len()-2)];
                         let inside_str = chars_to_string(slice);
                         let parsed = parse_html(slice, max_depth-1);
-                        children.push(HtmlNode::Element { name: chars_to_string(&tag_name), content: inside_str, children:parsed.children });
+                        children.push(HtmlNode::Element { name: chars_to_string(&tag_name), content: inside_str, children: parsed });
                     }
                     start_ind = end_ind + 1;
                 }

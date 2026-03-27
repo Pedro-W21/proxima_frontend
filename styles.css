@@ -99,6 +99,15 @@ tr td {
 
 }
 
+
+.mainapp-button:hover {
+  background-color:#568b3e;
+}
+
+.mainapp-button:active {
+  background-color:#6aab4c;
+}
+
 .chat-option {
   border-radius: 8px;
   background-color: #1a5800;
@@ -120,9 +129,6 @@ tr td {
   background-color:#6aab4c;
 }
 
-.mainapp-button:hover {
-  background-color:#568b3e;
-}
 
 
 .chat-part {
@@ -244,9 +250,6 @@ code {
   max-height:60vh;
 }
 
-.mainapp-button:active {
-  background-color:#6aab4c;
-}
 
 input {
   flex:1;
