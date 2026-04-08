@@ -4,10 +4,10 @@
 use std::{
     collections::HashSet, fs::File, io::Read, path::PathBuf, sync::{
         Arc, RwLock, atomic::{AtomicBool, Ordering}, mpmc::{Receiver, Sender}
-    }
+    }, usize
 };
 
-use base64::{Engine, prelude::BASE64_STANDARD};
+use base64::{Engine, prelude::{BASE64_STANDARD, BASE64_URL_SAFE}};
 use chrono::Utc;
 use futures_util::{StreamExt, TryFutureExt};
 use openai::Credentials;
@@ -152,6 +152,7 @@ async fn ai_endpoint_post_request(
     request: AIPayload,
     second: SecondArgument,
 ) -> Result<AIResponse, ()> {
+    println!("[backend] In request");
     match request.request.clone() {
         EndpointRequestVariant::RespondToFullPrompt {
             whole_context,
@@ -162,12 +163,14 @@ async fn ai_endpoint_post_request(
             access_mode,
         } => {
             if streaming {
+                println!("[backend] in streaming request");
                 let response = reqwest::Client::new()
                     .post(second.url)
                     .json(&request)
                     .send()
                     .await;
 
+                println!("[backend] Sent request");
                 match response {
                     Ok(data) => {
                         let mut stream = data.bytes_stream();
@@ -202,6 +205,9 @@ async fn ai_endpoint_post_request(
                                                         ContextPart::new(vec![data], pos);
                                                 }
                                             }
+                                            EndpointResponseVariant::EndpointError(error) => {
+                                                println!("[backend] got AI endpoint error");
+                                            }
                                             _ => (),
                                         }
                                     } else {
@@ -220,6 +226,7 @@ async fn ai_endpoint_post_request(
                     Err(error) => Err(()),
                 }
             } else {
+                println!("[backend] in non streaming request");
                 let response = reqwest::Client::new()
                     .post(second.url)
                     .json(&request)
@@ -266,17 +273,17 @@ async fn auth_post_request(
                     }
                     Err(error) => {
                         dbg!(error);
-                        Err(())
+                        Ok(AuthResponse { session_token: String::new(), device_id: usize::MAX })
                     }
                 }
             } else {
                 dbg!(data.status());
-                Err(())
+                Ok(AuthResponse { session_token: String::new(), device_id: usize::MAX })
             }
         }
         Err(error) => {
             dbg!(error);
-            Err(())
+            Ok(AuthResponse { session_token: String::new(), device_id: usize::MAX })
         }
     }
 }
@@ -313,7 +320,7 @@ async fn add_media_from_file_if_exists(state: tauri::State<'_, ProximaState>, te
     let mut hasher = Sha3_256::new();
     hasher.update(&bytes);
     let hash:[u8 ; 32] = hasher.finalize().into();
-    let hash = BASE64_STANDARD.encode(hash);
+    let hash = BASE64_URL_SAFE.encode(hash);
     println!("[backend] hashed file");
 
 

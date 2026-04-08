@@ -22,6 +22,7 @@ use web_sys::HtmlElement;
 use yew::virtual_dom::VNode;
 use yew::{AttrValue, Callback, Event, Html, MouseEvent, Properties, UseReducerHandle, function_component, html, use_context, use_effect_with, use_node_ref, use_state_eq};
 
+use crate::alerts::Alerts;
 use crate::app::{DatabaseAction, DatabaseState, PrintArgs, ProximaState, invoke, make_ai_request, make_db_request, print};
 use crate::db_sync::get_delta_for_add;
 use crate::html_parsing::{HtmlNode, parse_html};
@@ -78,6 +79,7 @@ impl SortingMode {
 #[function_component(ChatTab)]
 
 pub fn chat_tab() -> Html {
+    let alerts_state = use_context::<UseReducerHandle<Alerts>>().expect("no ctx found");
     let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
     let db_state = use_context::<UseReducerHandle<DatabaseState>>().expect("no ctx found");
     let prompt_node_ref = use_node_ref();
@@ -348,12 +350,12 @@ pub fn chat_tab() -> Html {
             
             html!(
 
-                <div><button onclick={callback} class="chat-option chosen-chat text-left">{match chat.get_title() {Some(title) => shorten_title_to_x_chars(title.clone(), 20), None => format!("Chat {}", *id)}}</button></div>
+                <div class="chat-option-div"><button onclick={callback} class="chat-option chosen-chat text-left">{match chat.get_title() {Some(title) => shorten_title_to_x_chars(title.clone(), 20), None => format!("Chat {}", *id)}}</button></div>
             )
         }
         else {
             html!(
-                <div><button onclick={callback} class="chat-option text-left">{match chat.get_title() {Some(title) => shorten_title_to_x_chars(title.clone(), 20), None => format!("Chat {}", *id)}}</button></div>
+                <div class="chat-option-div"><button onclick={callback} class="chat-option text-left">{match chat.get_title() {Some(title) => shorten_title_to_x_chars(title.clone(), 20), None => format!("Chat {}", *id)}}</button></div>
             )
         }
     }).collect::<Html>();
@@ -626,7 +628,17 @@ fn context_part(prop:&ContextPartProp) -> Html {
         html!(
             <div class="chat-title-display">
                 <div>{pos_add}</div>
-                <div>{if let Some(date) = prop.context_part.get_date() {format!("{date}")} else {"".to_string()}}</div>
+                <div>{if let Some(date) = prop.context_part.get_date() {
+
+                    let date_chars = &format!("{date}").chars().collect::<Vec<char>>()[..19];
+                    let mut final_str = String::with_capacity(19);
+                    for char in date_chars {
+                        final_str.push(*char);
+                    }
+                    final_str
+                } else {
+                    "".to_string()
+                }}</div>
                 <button class={button_style} disabled={disabled} onclick={delete_part_callback}>{"Delete part"}</button>
             </div>
         );
@@ -652,17 +664,25 @@ fn context_part(prop:&ContextPartProp) -> Html {
         )
     }
     else {
+        let turn_class = if let ContextPosition::Tool(_) = prop.context_part.get_position() {
+            "standard-padding-margin-corners tool-turn"
+        }
+        else {
+            "standard-padding-margin-corners ai-turn"
+        };
         let parsed = parse_html(&all_text.chars().collect::<Vec<char>>(), 2);
         if parsed.has_elements() {
             let mut htmls = Vec::with_capacity(parsed.children.len());
             for child in parsed.children {
                 if let HtmlNode::Element { name, content, children } = child {
                     if name == "think" {
-                        htmls.push(
-                            html!(
-                                <ThinkingPartShow txt={content} finished=true/>
-                            )
-                        );
+                        if content.trim().len() > 2 {
+                            htmls.push(
+                                html!(
+                                    <ThinkingPartShow txt={content} finished=true/>
+                                )
+                            );
+                        }
                     }
                     else if name == "call" && children.children.len() >= 3 && let Some(HtmlNode::Element { name:child_name, content:child_content, children:tool_children }) = &children.get_first_element() && child_name.trim() == "tool" {
                         let child_content = child_content.clone();
@@ -730,7 +750,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
             }
             if htmls.len() > 0 {
                 html!(
-                    <div class="standard-padding-margin-corners nonuser-turn">
+                    <div class={turn_class}>
                     <>{part_title_add}</>
                     <div>{htmls}</div>
                     </div>
@@ -742,7 +762,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
         }
         else if all_text.contains("<think>") {
             html!(
-                <div class="standard-padding-margin-corners nonuser-turn">
+                <div class={turn_class}>
                 <>{part_title_add}</>
                 <ThinkingPartShow txt={all_text} finished=false/>
                 </div>
@@ -751,7 +771,7 @@ fn context_part(prop:&ContextPartProp) -> Html {
         else if all_text.trim().len() > 0 {
 
             html!(
-                <div class="standard-padding-margin-corners nonuser-turn">
+                <div class={turn_class}>
                 <>{part_title_add}</>
                 <div> {VNode::from_html_unchecked(AttrValue::from(to_html(all_text.trim())))}</div>
                 </div>
@@ -1055,7 +1075,7 @@ fn media_part(prop:&MediaPartProp) -> Html {
             MediaType::PDF => html!(<div>{format!("{}", media.file_name.clone())}</div>),
             _ => {
                 let url = proxima_state.chat_url.clone();
-                let full_url = format!("{url}/media/{}", media.file_name);
+                let full_url = format!("{url}/media/{}", media.hash);
                 html!(
                     <div>
                     <img src={full_url} class="hundred-p-width"/>

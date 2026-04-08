@@ -15,7 +15,7 @@ use markdown::to_html;
 use web_sys::{EventTarget, HtmlElement};
 use futures::StreamExt;
 
-use crate::{db_sync::{UserCursors, apply_server_updates, get_delta_for_add, get_next_id_for_category, handle_add_reducible}, tabs::{access_modes_tab::AccessModesTab, chat_configs_tab::ChatConfigsTab, chat_tab::ChatTab, home_tab::HomeTab, notification_tab::{NotificationTab, generate_title_and_desc_for}, tags_tab::TagsTab}};
+use crate::{alerts::{AlertCategory, AlertData, AlertTab, Alerts, AlertsAction, AlertsShow}, db_sync::{UserCursors, apply_server_updates, get_delta_for_add, get_next_id_for_category, handle_add_reducible}, tabs::{access_modes_tab::AccessModesTab, chat_configs_tab::ChatConfigsTab, chat_tab::ChatTab, home_tab::HomeTab, notification_tab::{NotificationTab, generate_title_and_desc_for}, tags_tab::TagsTab}};
 
 #[wasm_bindgen]
 extern "C" {
@@ -82,6 +82,7 @@ struct InitializeInnerArgs {
 #[function_component(Initialize)]
 pub fn initialize_page() -> Html {
     let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
+    let alerts = use_reducer_eq(|| {Alerts::new()});
     let pseudonym_input = use_node_ref();
     let prox_folder_input = use_node_ref();
     let local_ai_url_input = use_node_ref();
@@ -90,8 +91,10 @@ pub fn initialize_page() -> Html {
         let prox_folder_input_clone = prox_folder_input.clone();
         let local_ai_url_input_clone = local_ai_url_input.clone();
         let first_clone = proxima_state.clone();
+        let alerts = alerts.clone();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
+            let alerts = alerts.clone();
             let test = pseudonym_input_clone.clone();
             let test2 = prox_folder_input_clone.clone();
             let test3 = local_ai_url_input_clone.clone();
@@ -116,23 +119,17 @@ pub fn initialize_page() -> Html {
                 let args = serde_wasm_bindgen::to_value(&HttpAuthPostRequest {request:json_request, url:local_ai_url.clone() + "/auth"}).unwrap();
 
                 let return_val = invoke("auth_post_request", args).await;
-
                 let value =
                  return_val
                  .into_serde::<AuthResponse>();
-    
-                match &value {
-                    Ok(_) => (),
-                    Err(error) => {
-                        let args = serde_wasm_bindgen::to_value(&PrintArgs {value:format!("{:?}", error)}).unwrap();
-                        print(format!("{:?}", error)).await;
-                    }
-                }
 
-                let value = value;
                 print("Got a response from the server").await;
                 match value {
                     Ok(response) => {
+                        if response.device_id == usize::MAX {
+                            print("adding alert").await;
+                            return;
+                        }
                         let args2: JsValue = serde_wasm_bindgen::to_value(&StreamingUpdateRequest {test:response.session_token.clone(), test2:local_ai_url.clone() + "/db"}).unwrap();
                         invoke("streaming_update_task", args2).await;
 
@@ -162,7 +159,10 @@ pub fn initialize_page() -> Html {
                         }
 
                     },
-                    Err(_) => ()
+                    Err(error) => {
+                        print(format!("{error}")).await;
+                        alerts.dispatch(AlertsAction::AddAlert(AlertData::new(AlertTab::Initialization, AlertCategory::Database, format!("{} does not point to a Proxima backend server", local_ai_url.clone()))));
+                    }
                 }
 
             });
@@ -171,7 +171,7 @@ pub fn initialize_page() -> Html {
 
     html! {
         <main class="container">
-            <div class="first-level standard-padding-margin-corners">
+            <div class="first-level standard-padding-margin-corners dialog-on-top">
                 <h1>{"Welcome to Proxima !"}</h1>
 
                 <p>{"We need a bit of info to get you started :"}</p>
@@ -186,6 +186,10 @@ pub fn initialize_page() -> Html {
                     <button class="mainapp-button standard-padding-margin-corners most-horizontal-space-no-flex" type="submit">{"Start"}</button>
                 </form>
             </div>
+            
+            <ContextProvider<UseReducerHandle<Alerts>> context={alerts.clone()}>
+                <AlertsShow/>
+            </ContextProvider<UseReducerHandle<Alerts>>>
         </main>
     }
 }
@@ -464,8 +468,9 @@ fn mark_updated(cursors:&mut UserCursors, db_id:DatabaseItemID) {
 
 #[function_component(MainPage)]
 pub fn app_page() -> Html {
+    let alert_state = use_reducer_eq(|| {Alerts::new()});
     let proxima_state = use_context::<UseReducerHandle<ProximaState>>().expect("no ctx found");
-    let db_state = use_reducer_eq(DatabaseState::default);
+    let db_state = use_reducer(DatabaseState::default);
     let got_start = use_state_eq(|| false);
     {
         let proxima_state = proxima_state.clone();
@@ -495,8 +500,10 @@ pub fn app_page() -> Html {
             let div_node_ref = event_div_node_ref.clone();
             let second_db = second_db.clone();
             let proxima_state = proxima_state.clone();
+            let alert_state = alert_state.clone();
             move |_| {
                 let mut custard_listener = None;
+                let alert_state = alert_state.clone();
 
                 let db_state = second_db.clone();
                 let proxima_state = proxima_state.clone();
@@ -541,11 +548,13 @@ pub fn app_page() -> Html {
                                 },
                                 EndpointResponseVariant::EndStream(data, position) => {
                                     print("It's a end stream event").await;
-                                    panic!("Odd, not supposed to get that yet");
+                                },
+                                EndpointResponseVariant::EndpointError(error) => {
+                                    print("Got backend error").await;
+                                    alert_state.dispatch(AlertsAction::AddAlert(AlertData::new(AlertTab::Chats, AlertCategory::AIEndpoint, format!("AI Endpoint unreachable"))));
                                 },
                                 _ => {
                                     print("It's an impossible stream event").await;
-                                    panic!("Impossible to get that here")
                                 }
                             }
 
@@ -643,52 +652,64 @@ pub fn app_page() -> Html {
         /*Home*/ 0 => {
             let db_state = db_state.clone();
             html!(
+                <ContextProvider<UseReducerHandle<Alerts>> context={alert_state.clone()}>
                 <ContextProvider<UseReducerHandle<DatabaseState>> context={db_state}>
                     <HomeTab/>
                 </ContextProvider<UseReducerHandle<DatabaseState>>>
+                </ContextProvider<UseReducerHandle<Alerts>>>
             )
         },
         /*Chat*/ 1 => 
         {
             let db_state = db_state.clone();
             html!(
+                <ContextProvider<UseReducerHandle<Alerts>> context={alert_state.clone()}>
                 <ContextProvider<UseReducerHandle<DatabaseState>> context={db_state}>
                     <ChatTab/>
                 </ContextProvider<UseReducerHandle<DatabaseState>>>
+                </ContextProvider<UseReducerHandle<Alerts>>>
             )
         }
         /* Tags */ 2 => {
 
             let db_state = db_state.clone();
             html!(
+                <ContextProvider<UseReducerHandle<Alerts>> context={alert_state.clone()}>
                 <ContextProvider<UseReducerHandle<DatabaseState>> context={db_state}>
                     <TagsTab/>
                 </ContextProvider<UseReducerHandle<DatabaseState>>>
+                </ContextProvider<UseReducerHandle<Alerts>>>
             )
         },
         /* Access Modes */ 3 => {
             let db_state = db_state.clone();
             html!(
+                <ContextProvider<UseReducerHandle<Alerts>> context={alert_state.clone()}>
                 <ContextProvider<UseReducerHandle<DatabaseState>> context={db_state}>
                     <AccessModesTab/>
                 </ContextProvider<UseReducerHandle<DatabaseState>>>
+                </ContextProvider<UseReducerHandle<Alerts>>>
             )
         },
         /*Files*/ 4 => html!(),
         /*Chat Configurations */ 5 => {
             let db_state = db_state.clone();
             html!(
+                <ContextProvider<UseReducerHandle<Alerts>> context={alert_state.clone()}>
                 <ContextProvider<UseReducerHandle<DatabaseState>> context={db_state}>
                     <ChatConfigsTab/>
                 </ContextProvider<UseReducerHandle<DatabaseState>>>
+                </ContextProvider<UseReducerHandle<Alerts>>>
             )
         },
         /* Notifications */6 => {
             let db_state = db_state.clone();
             html!(
+                <ContextProvider<UseReducerHandle<Alerts>> context={alert_state.clone()}>
                 <ContextProvider<UseReducerHandle<DatabaseState>> context={db_state.clone()}>
                     <NotificationTab/>
                 </ContextProvider<UseReducerHandle<DatabaseState>>>
+                </ContextProvider<UseReducerHandle<Alerts>>>
             )
         }
         _ => html!({"Something is very wrong"})
@@ -746,6 +767,9 @@ pub fn app_page() -> Html {
                 {current_app}
             </div>
             <div ref={event_div_node_ref}></div>
+            <ContextProvider<UseReducerHandle<Alerts>> context={alert_state.clone()}>
+                <AlertsShow/>
+            </ContextProvider<UseReducerHandle<Alerts>>>
         </main>
     }
 }

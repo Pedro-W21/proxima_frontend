@@ -100,6 +100,7 @@ pub fn chat_configs_tab() -> Html {
             if let Some(config_id) = db_state.cursors.config_for_modification && let Some(config) = db_state.db.configs.get_configs().get(&config_id) && let Some(setting) = db_state.cursors.chosen_setting {
                 let mut config = config.clone();
                 config.raw_settings.remove(setting);
+                config.set_tools(Tools::try_from_settings(config.raw_settings.clone()));
                 let proxima_state = proxima_state.clone();
                 spawn_local(async move {
                     let json_request = DBPayload { auth_key: proxima_state.auth_token.clone(), request: DatabaseRequestVariant::Update(DatabaseItem::ChatConfig(config.clone())) };
